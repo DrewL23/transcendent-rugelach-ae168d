@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Submissions — Bright Star Auctions</title>
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root{
+    --paper:#F5F1E7; --ink:#1B1F24; --steel:#5B6472; --steel-soft:#D9D4C6;
+    --accent:#C1701F; --accent-ink:#FFFFFF; --good:#3F7D58; --warn:#AD3B24;
+    --surface:#FFFFFF; --surface-2:#ECE6D6; --line:#D9D4C6;
+    --radius:9px;
+    --font-display:"Arial Narrow","Helvetica Neue Condensed","Segoe UI Semibold",sans-serif;
+    --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#15181C; --ink:#EDE8DB; --steel:#8B93A0; --steel-soft:#2B3038;
+      --accent:#E08A3C; --accent-ink:#1A1000; --good:#6FBE8B; --warn:#E2725A;
+      --surface:#1C2025; --surface-2:#20242A; --line:#31363D;
+    }
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--font-body); line-height:1.45;}
+  #app{max-width:960px; margin:0 auto; min-height:100vh; padding:20px 16px 60px;}
+  button,input{font-family:inherit;}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+  .brand{font-family:var(--font-display); font-stretch:condensed; font-weight:800; text-transform:uppercase; letter-spacing:.03em; font-size:15px;}
+  .brand small{display:block; font-family:var(--font-body); font-weight:400; text-transform:none; letter-spacing:0; color:var(--steel); font-size:11px; margin-top:1px;}
+  h1.title{font-family:var(--font-display); font-stretch:condensed; font-weight:800; text-transform:uppercase; font-size:24px; margin:16px 0 4px;}
+  p.sub{color:var(--steel); margin:0 0 18px; font-size:14px;}
+
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:14px;}
+  .field{display:flex; flex-direction:column; gap:5px; margin-bottom:12px;}
+  .field label{font-size:12px; font-weight:600; color:var(--steel); text-transform:uppercase; letter-spacing:.03em;}
+  .field input{border:1px solid var(--line); border-radius:6px; padding:10px 11px; background:var(--paper); color:var(--ink); font-size:15px;}
+  .btn{border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:7px; padding:10px 16px; font-size:14px; font-weight:600; cursor:pointer;}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+  .btn.full{width:100%;}
+  .btn.ghost{background:transparent;}
+  .btn:disabled{opacity:.5; cursor:not-allowed;}
+  .err{color:var(--warn); font-size:13px; margin-top:8px;}
+
+  .toolbar{display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;}
+  .lotrow{display:flex; justify-content:space-between; align-items:center; gap:10px; border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin-bottom:8px; background:var(--surface); cursor:pointer;}
+  .lotrow:hover{border-color:var(--accent);}
+  .lotrow .nm{font-weight:700; font-size:15px;}
+  .lotrow .meta{font-size:12px; color:var(--steel); font-family:var(--font-mono); margin-top:2px;}
+  .pill{font-size:11px; padding:2px 9px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; flex-shrink:0;}
+  .pill.new{background:color-mix(in srgb, var(--accent) 18%, var(--surface)); color:var(--accent);}
+  .pill.reviewed{background:color-mix(in srgb, var(--good) 18%, var(--surface)); color:var(--good);}
+  .pill.imported{background:var(--steel-soft); color:var(--steel);}
+
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:5px 12px; font-size:14px;}
+  .kv dt{color:var(--steel);}
+  .kv dd{margin:0; font-family:var(--font-mono);}
+  .qlabel{font-size:14px; font-weight:600; display:block; margin-bottom:8px;}
+
+  .thumbgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; margin-top:10px;}
+  .thumbgrid a{display:block; aspect-ratio:1; border-radius:6px; overflow:hidden; background:var(--surface-2); position:relative;}
+  .thumbgrid img{width:100%; height:100%; object-fit:cover; display:block;}
+  .thumbgrid .lbl{position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.55); color:#fff; font-size:9.5px; padding:3px 5px; line-height:1.2;}
+  video{width:100%; border-radius:8px; background:#000; margin-top:10px;}
+
+  .empty{color:var(--steel); font-size:14px; text-align:center; padding:40px 10px;}
+  a.backlink{color:var(--steel); font-size:13px; text-decoration:none;}
+  .statusselect{border:1px solid var(--line); border-radius:6px; padding:6px 10px; background:var(--surface); color:var(--ink); font-size:13px;}
+  @media (prefers-reduced-motion: no-preference){ .lotrow{transition:border-color .15s ease;} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function(){
+  "use strict";
+
+  var SUPABASE_URL = "https://johrcgvbpwmlyhepckyo.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaHJjZ3ZicHdtbHloZXBja3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTcwNTEsImV4cCI6MjEwMTM5MzA1MX0.4dPLdUYNuFP9zDflQCYJ62YtK-yFXI0UDBF2VKr6y8g";
+  var BUCKET = "catalog-uploads";
+
+  var state = { screen:"login", session:null, lots:[], current:null, err:"" };
+
+  function el(html){
+    var t = document.createElement("template");
+    t.innerHTML = html.trim();
+    return t.content.firstElementChild;
+  }
+  function on(node, evt, fn){ node.addEventListener(evt, fn); return node; }
+  function esc(s){ return (s||"").toString().replace(/[&<>"']/g, function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+  function formatBytes(n){ if(!n) return ""; var mb=n/1048576; return mb>=1 ? mb.toFixed(1)+" MB" : Math.round(n/1024)+" KB"; }
+  function fileUrl(path){ return SUPABASE_URL+"/storage/v1/object/"+BUCKET+"/"+path; }
+
+  function authHeaders(){
+    return {
+      "apikey": SUPABASE_ANON_KEY,
+      "Authorization": "Bearer "+(state.session ? state.session.access_token : SUPABASE_ANON_KEY)
+    };
+  }
+
+  function login(email, password){
+    return fetch(SUPABASE_URL+"/auth/v1/token?grant_type=password", {
+      method:"POST",
+      headers:{"apikey":SUPABASE_ANON_KEY, "Content-Type":"application/json"},
+      body:JSON.stringify({email:email, password:password})
+    }).then(function(res){
+      if(!res.ok) throw new Error("Login failed — check email and password.");
+      return res.json();
+    }).then(function(session){
+      state.session = session;
+      sessionStorage.setItem("bsa_admin_session", JSON.stringify(session));
+    });
+  }
+
+  function loadLots(){
+    return fetch(SUPABASE_URL+"/rest/v1/lots?select=*&order=created_at.desc", {
+      headers: authHeaders()
+    }).then(function(res){
+      if(!res.ok) throw new Error("Could not load submissions.");
+      return res.json();
+    }).then(function(rows){ state.lots = rows; });
+  }
+
+  function updateStatus(lotId, status){
+    return fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lotId, {
+      method:"PATCH",
+      headers:Object.assign({"Content-Type":"application/json", "Prefer":"return=representation"}, authHeaders()),
+      body:JSON.stringify({status:status})
+    });
+  }
+
+  function fetchAsBlob(path){
+    return fetch(fileUrl(path), {headers:authHeaders()}).then(function(res){
+      if(!res.ok) throw new Error("Could not fetch "+path);
+      return res.blob();
+    });
+  }
+
+  function downloadFile(path, filename){
+    fetchAsBlob(path).then(function(blob){
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }).catch(function(err){ alert(err.message); });
+  }
+
+  function render(){
+    var app = document.getElementById("app");
+    app.innerHTML = "";
+    app.appendChild(el(
+      '<div class="brand">Bright Star Auctions<small>Seller submissions</small></div>'
+    ));
+    if(state.screen==="login") return renderLogin(app);
+    if(state.screen==="list") return renderList(app);
+    if(state.screen==="detail") return renderDetail(app);
+  }
+
+  function renderLogin(app){
+    app.appendChild(el('<h1 class="title">Admin Login</h1>'));
+    app.appendChild(el('<p class="sub">Sign in with the admin account you created in Supabase.</p>'));
+    var card = el('<div class="card"></div>');
+    var emailField = el('<div class="field"><label>Email</label><input type="email"></div>');
+    var passField = el('<div class="field"><label>Password</label><input type="password"></div>');
+    card.appendChild(emailField); card.appendChild(passField);
+    var btn = el('<button class="btn primary full">Sign In</button>');
+    var errBox = el('<div class="err" style="display:none;"></div>');
+    on(btn, "click", function(){
+      var email = emailField.querySelector("input").value.trim();
+      var pass = passField.querySelector("input").value;
+      btn.disabled = true; btn.textContent = "Signing in...";
+      login(email, pass).then(function(){
+        return loadLots();
+      }).then(function(){
+        state.screen = "list"; render();
+      }).catch(function(err){
+        btn.disabled = false; btn.textContent = "Sign In";
+        errBox.textContent = err.message; errBox.style.display = "block";
+      });
+    });
+    card.appendChild(btn); card.appendChild(errBox);
+    app.appendChild(card);
+  }
+
+  function renderList(app){
+    var top = el('<div class="toolbar"></div>');
+    top.appendChild(el('<h1 class="title" style="margin:0;">Submissions ('+state.lots.length+')</h1>'));
+    var refreshBtn = el('<button class="btn">Refresh</button>');
+    on(refreshBtn, "click", function(){
+      refreshBtn.disabled = true; refreshBtn.textContent = "Refreshing...";
+      loadLots().then(function(){ render(); });
+    });
+    top.appendChild(refreshBtn);
+    app.appendChild(top);
+
+    if(!state.lots.length){
+      app.appendChild(el('<div class="empty">No submissions yet. They will show up here as soon as a seller finishes cataloging.</div>'));
+      return;
+    }
+
+    state.lots.forEach(function(lot){
+      var info = lot.info || {};
+      var photoCount = (lot.photos||[]).length;
+      var row = el(
+        '<div class="lotrow">'+
+          '<div><div class="nm">'+esc(info.make)+' '+esc(info.model)+' <span style="color:var(--steel);font-weight:400;">— '+esc(lot.category)+'</span></div>'+
+          '<div class="meta">S/N '+esc(info.serial||"—")+' · '+photoCount+' photos'+(lot.video&&lot.video.path?" · video":"")+' · '+esc(new Date(lot.created_at).toLocaleString())+'</div></div>'+
+          '<span class="pill '+esc(lot.status||"new")+'">'+esc(lot.status||"new")+'</span>'+
+        '</div>'
+      );
+      on(row, "click", function(){ state.current = lot; state.screen = "detail"; render(); });
+      app.appendChild(row);
+    });
+  }
+
+  function renderDetail(app){
+    var lot = state.current;
+    var info = lot.info || {}, cond = lot.condition || {}, attach = lot.attach || {};
+    var back = el('<a class="backlink" href="javascript:void(0)">&larr; Back to all submissions</a>');
+    on(back, "click", function(){ state.screen = "list"; render(); });
+    app.appendChild(back);
+
+    app.appendChild(el('<h1 class="title">'+esc(info.make)+' '+esc(info.model)+'</h1>'));
+    app.appendChild(el('<p class="sub">'+esc(lot.category)+' · submitted '+esc(new Date(lot.created_at).toLocaleString())+'</p>'));
+
+    var statusCard = el('<div class="card"></div>');
+    statusCard.appendChild(el('<span class="qlabel">Status</span>'));
+    var sel = el(
+      '<select class="statusselect">'+
+        '<option value="new">New</option>'+
+        '<option value="reviewed">Reviewed</option>'+
+        '<option value="imported">Imported to bidding site</option>'+
+      '</select>'
+    );
+    sel.value = lot.status || "new";
+    on(sel, "change", function(){ updateStatus(lot.id, sel.value); lot.status = sel.value; });
+    statusCard.appendChild(sel);
+    app.appendChild(statusCard);
+
+    var kvCard = el('<div class="card"></div>');
+    kvCard.appendChild(el('<span class="qlabel">Basic info</span>'));
+    kvCard.appendChild(el(
+      '<dl class="kv">'+
+      '<dt>Year</dt><dd>'+esc(info.year||"—")+'</dd>'+
+      '<dt>Serial</dt><dd>'+esc(info.serial||"—")+'</dd>'+
+      '<dt>Meter</dt><dd>'+esc(info.meter||"—")+'</dd>'+
+      '<dt>Location</dt><dd>'+esc(info.location||"—")+'</dd>'+
+      '<dt>Seller</dt><dd>'+esc(info.seller||"—")+'</dd>'+
+      '</dl>'
+    ));
+    app.appendChild(kvCard);
+
+    var condCard = el('<div class="card"></div>');
+    condCard.appendChild(el('<span class="qlabel">Condition & disclosure</span>'));
+    condCard.appendChild(el(
+      '<dl class="kv">'+
+      '<dt>Starts</dt><dd>'+esc(cond.starts||"—")+'</dd>'+
+      '<dt>Moves</dt><dd>'+esc(cond.moves||"—")+'</dd>'+
+      '<dt>Hydraulics</dt><dd>'+esc(cond.hydraulics||"—")+'</dd>'+
+      '<dt>Warning lights</dt><dd>'+esc(cond.lights||"—")+'</dd>'+
+      '<dt>Leaks</dt><dd>'+esc(cond.leaks||"—")+'</dd>'+
+      '<dt>Records</dt><dd>'+esc(cond.records||"—")+'</dd>'+
+      '</dl>'
+    ));
+    if(cond.issues) condCard.appendChild(el('<p style="margin-top:10px;font-size:13.5px;"><b>Known issues:</b> '+esc(cond.issues)+'</p>'));
+    if(cond.notes) condCard.appendChild(el('<p style="margin-top:6px;font-size:13.5px;"><b>Notes:</b> '+esc(cond.notes)+'</p>'));
+    app.appendChild(condCard);
+
+    if(attach.list && attach.list.length){
+      var attachCard = el('<div class="card"></div>');
+      attachCard.appendChild(el('<span class="qlabel">Included with sale</span>'));
+      attachCard.appendChild(el('<p style="font-size:14px;margin:0;">'+esc(attach.list.concat(attach.other?[attach.other]:[]).join(", "))+'</p>'));
+      app.appendChild(attachCard);
+    }
+
+    if(lot.video && lot.video.path){
+      var vidCard = el('<div class="card"></div>');
+      vidCard.appendChild(el('<span class="qlabel">Operating video — '+esc(lot.video.name||"")+' ('+formatBytes(lot.video.size)+')</span>'));
+      var vtag = el('<video controls></video>');
+      fetchAsBlob(lot.video.path).then(function(blob){ vtag.src = URL.createObjectURL(blob); });
+      vidCard.appendChild(vtag);
+      var dlBtn = el('<button class="btn" style="margin-top:10px;">Download Video</button>');
+      on(dlBtn, "click", function(){ downloadFile(lot.video.path, (info.make||"lot")+"-"+(info.model||"")+"-video."+(lot.video.path.split(".").pop())); });
+      vidCard.appendChild(dlBtn);
+      app.appendChild(vidCard);
+    } else if(lot.video && lot.video.na){
+      app.appendChild(el('<div class="card"><span class="qlabel">Operating video</span><p style="font-size:14px;margin:0;">Marked not applicable by the seller.</p></div>'));
+    }
+
+    var photos = lot.photos || [];
+    var photosCard = el('<div class="card"></div>');
+    photosCard.appendChild(el('<span class="qlabel">Photos ('+photos.length+')</span>'));
+    var grid = el('<div class="thumbgrid"></div>');
+    photos.forEach(function(p){
+      var link = el('<a href="javascript:void(0)"><span class="lbl">'+esc(p.title||p.stepId)+'</span></a>');
+      var img = el('<img loading="lazy">');
+      fetchAsBlob(p.path).then(function(blob){ img.src = URL.createObjectURL(blob); });
+      link.insertBefore(img, link.firstChild);
+      on(link, "click", function(){ downloadFile(p.path, (p.stepId||"photo")+".jpg"); });
+      grid.appendChild(link);
+    });
+    (lot.damage||[]).forEach(function(d, i2){
+      var link = el('<a href="javascript:void(0)"><span class="lbl">Issue: '+esc(d.note||"")+'</span></a>');
+      var img = el('<img loading="lazy">');
+      fetchAsBlob(d.path).then(function(blob){ img.src = URL.createObjectURL(blob); });
+      link.insertBefore(img, link.firstChild);
+      on(link, "click", function(){ downloadFile(d.path, "damage-"+i2+".jpg"); });
+      grid.appendChild(link);
+    });
+    photosCard.appendChild(grid);
+    app.appendChild(photosCard);
+  }
+
+  var saved = sessionStorage.getItem("bsa_admin_session");
+  if(saved){
+    try{
+      state.session = JSON.parse(saved);
+      state.screen = "list";
+      loadLots().then(render).catch(function(){ state.screen="login"; render(); });
+    }catch(e){ render(); }
+  } else {
+    render();
+  }
+})();
+</script>
+</body>
+</html>
