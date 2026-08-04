@@ -1,0 +1,1321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equipment Self-Catalog — Bright Star Auctions</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Self-Catalog">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#C1701F">
+<style>
+  :root{
+    --paper:#F5F1E7; --ink:#1B1F24; --steel:#5B6472; --steel-soft:#D9D4C6;
+    --accent:#C1701F; --accent-ink:#FFFFFF; --good:#3F7D58; --warn:#AD3B24;
+    --surface:#FFFFFF; --surface-2:#ECE6D6; --line:#D9D4C6;
+    --radius:9px;
+    --font-display:"Arial Narrow","Helvetica Neue Condensed","Segoe UI Semibold",sans-serif;
+    --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#15181C; --ink:#EDE8DB; --steel:#8B93A0; --steel-soft:#2B3038;
+      --accent:#E08A3C; --accent-ink:#1A1000; --good:#6FBE8B; --warn:#E2725A;
+      --surface:#1C2025; --surface-2:#20242A; --line:#31363D;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#15181C; --ink:#EDE8DB; --steel:#8B93A0; --steel-soft:#2B3038;
+    --accent:#E08A3C; --accent-ink:#1A1000; --good:#6FBE8B; --warn:#E2725A;
+    --surface:#1C2025; --surface-2:#20242A; --line:#31363D;
+  }
+  :root[data-theme="light"]{
+    --paper:#F5F1E7; --ink:#1B1F24; --steel:#5B6472; --steel-soft:#D9D4C6;
+    --accent:#C1701F; --accent-ink:#FFFFFF; --good:#3F7D58; --warn:#AD3B24;
+    --surface:#FFFFFF; --surface-2:#ECE6D6; --line:#D9D4C6;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--font-body); line-height:1.45;
+    -webkit-tap-highlight-color:transparent;
+  }
+  #app{max-width:640px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column;}
+  button{font-family:inherit; cursor:pointer;}
+  input,textarea,select{font-family:inherit;}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+  header.topbar{
+    position:sticky; top:0; z-index:5; background:var(--paper);
+    border-bottom:1px solid var(--line); padding:12px 16px 10px;
+  }
+  .brandrow{display:flex; align-items:baseline; justify-content:space-between; gap:8px;}
+  .brand{
+    font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+    text-transform:uppercase; letter-spacing:.03em; font-size:15px; color:var(--ink);
+  }
+  .brand small{display:block; font-family:var(--font-body); font-weight:400; text-transform:none;
+    letter-spacing:0; color:var(--steel); font-size:11px; margin-top:1px;}
+  .lotbadge{
+    font-family:var(--font-mono); font-size:11px; color:var(--steel);
+    border:1px solid var(--line); border-radius:20px; padding:3px 10px; white-space:nowrap;
+  }
+  .stagetrack{display:flex; gap:4px; margin-top:10px;}
+  .stagetrack i{flex:1; height:4px; border-radius:2px; background:var(--steel-soft); display:block;}
+  .stagetrack i.done{background:var(--good);}
+  .stagetrack i.active{background:var(--accent);}
+
+  main{flex:1; padding:20px 16px 12px;}
+  .stagelabel{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--accent); margin:0 0 6px;
+  }
+  h1.screentitle{
+    font-family:var(--font-display); font-stretch:condensed; font-weight:800;
+    text-transform:uppercase; letter-spacing:.01em; font-size:26px; margin:0 0 4px;
+    text-wrap:balance;
+  }
+  p.sub{color:var(--steel); margin:0 0 18px; font-size:14.5px; max-width:34em;}
+
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:16px; margin-bottom:14px;
+  }
+  .tagcard{position:relative; padding-top:18px;}
+  .tagcard::before{
+    content:""; position:absolute; top:0; left:16px; width:34px; height:6px;
+    background:var(--accent); border-radius:0 0 4px 4px;
+  }
+
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .field{display:flex; flex-direction:column; gap:5px; margin-bottom:12px;}
+  .field label{font-size:12px; font-weight:600; color:var(--steel); text-transform:uppercase; letter-spacing:.03em;}
+  .field .hint{font-size:12px; color:var(--steel); font-weight:400; text-transform:none; letter-spacing:0;}
+  .field input[type=text], .field input[type=number], .field input[type=tel], .field input[type=email], .field textarea{
+    border:1px solid var(--line); border-radius:6px; padding:10px 11px; background:var(--paper);
+    color:var(--ink); font-size:15px; font-family:var(--font-mono);
+  }
+  .field textarea{font-family:var(--font-body); resize:vertical; min-height:64px;}
+  .field input:focus, .field textarea:focus{border-color:var(--accent);}
+
+  .catgrid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .catbtn{
+    text-align:left; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:14px 12px; display:flex; flex-direction:column; gap:2px;
+  }
+  .catbtn .name{font-family:var(--font-display); font-stretch:condensed; font-weight:800; text-transform:uppercase; font-size:15px;}
+  .catbtn .desc{font-size:12px; color:var(--steel);}
+  .catbtn:hover, .catbtn:focus-visible{border-color:var(--accent);}
+
+  .photostep .frame{
+    border:2px dashed var(--line); border-radius:var(--radius); background:var(--surface-2);
+    min-height:220px; display:flex; align-items:center; justify-content:center; overflow:hidden;
+    position:relative; margin-bottom:12px;
+  }
+  .photostep .frame img{width:100%; height:100%; object-fit:cover; display:block;}
+  .photostep .frame .placeholder{color:var(--steel); font-size:13px; text-align:center; padding:20px;}
+  .photostep .frame .na{color:var(--steel); font-size:13px; font-style:italic;}
+  .stepmeta{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:2px;}
+  .stepcount{font-family:var(--font-mono); font-size:12px; color:var(--steel);}
+  .req{font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--warn); font-weight:700;}
+  .tip{
+    font-size:13px; color:var(--steel); background:var(--surface-2); border-radius:6px;
+    padding:8px 10px; margin-top:10px; border-left:3px solid var(--accent);
+  }
+
+  .btnrow{display:flex; gap:10px; flex-wrap:wrap;}
+  .btn{
+    border:1px solid var(--line); background:var(--surface); color:var(--ink);
+    border-radius:7px; padding:11px 16px; font-size:14px; font-weight:600;
+  }
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:var(--accent-ink);}
+  .btn.ghost{background:transparent;}
+  .btn.full{width:100%; text-align:center;}
+  .btn:disabled{opacity:.45; cursor:not-allowed;}
+  .btn.warn{border-color:var(--warn); color:var(--warn); background:transparent;}
+
+  footer.navbar{
+    position:sticky; bottom:0; background:var(--paper); border-top:1px solid var(--line);
+    padding:12px 16px; display:flex; gap:10px;
+  }
+  footer.navbar .btn{flex:1;}
+
+  .qrow{border-bottom:1px solid var(--line); padding:12px 0;}
+  .qrow:last-child{border-bottom:none;}
+  .qrow legend, .qrow .qlabel{font-size:14px; font-weight:600; margin-bottom:8px; display:block;}
+  .qrow .qhint{font-size:12.5px; color:var(--steel); margin-top:-4px; margin-bottom:8px;}
+  .choices{display:flex; gap:8px; flex-wrap:wrap;}
+  .choices label{
+    border:1px solid var(--line); border-radius:20px; padding:6px 13px; font-size:13px;
+    display:flex; align-items:center; gap:6px; background:var(--surface);
+  }
+  .choices input{accent-color:var(--accent);}
+  .choices label.picked{border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--surface));}
+
+  .callout{
+    background:var(--surface-2); border-radius:var(--radius); padding:14px 15px; margin-bottom:16px;
+    border:1px solid var(--line);
+  }
+  .callout h3{margin:0 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--accent);}
+  .callout ol{margin:0; padding-left:20px; font-size:13.5px; color:var(--ink);}
+  .callout li{margin-bottom:6px;}
+  .callout li b{color:var(--ink);}
+
+  .checkgrid{display:flex; flex-direction:column; gap:8px;}
+  .checkgrid label{display:flex; align-items:flex-start; gap:9px; font-size:14px;}
+  .checkgrid input{margin-top:3px; accent-color:var(--accent);}
+
+  .damagelist{display:flex; flex-direction:column; gap:10px; margin-top:10px;}
+  .damageitem{display:flex; gap:10px; border:1px solid var(--line); border-radius:8px; padding:10px; align-items:flex-start;}
+  .damageitem img{width:56px; height:56px; object-fit:cover; border-radius:6px; flex-shrink:0; background:var(--surface-2);}
+  .damageitem .txt{flex:1; font-size:13.5px;}
+  .damageitem .rm{background:none; border:none; color:var(--warn); font-size:12px; font-weight:700;}
+
+  .thumbgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px;}
+  .thumbgrid .t{aspect-ratio:1; border-radius:6px; overflow:hidden; position:relative; background:var(--surface-2);}
+  .thumbgrid .t img{width:100%; height:100%; object-fit:cover;}
+  .thumbgrid .t .lbl{
+    position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.55); color:#fff;
+    font-size:9.5px; padding:3px 5px; line-height:1.2;
+  }
+  .thumbgrid .t.missing{display:flex; align-items:center; justify-content:center; border:1px dashed var(--warn);}
+  .thumbgrid .t.missing span{font-size:10px; color:var(--warn); text-align:center; padding:4px;}
+
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:5px 12px; font-size:14px;}
+  .kv dt{color:var(--steel);}
+  .kv dd{margin:0; font-family:var(--font-mono);}
+
+  .lotchip{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px;
+    background:var(--surface);
+  }
+  .lotchip .nm{font-weight:700; font-size:14px;}
+  .lotchip .meta{font-size:12px; color:var(--steel); font-family:var(--font-mono);}
+
+  .pill{font-size:11px; padding:2px 9px; border-radius:20px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;}
+  .pill.good{background:color-mix(in srgb, var(--good) 18%, var(--surface)); color:var(--good);}
+  .pill.warn{background:color-mix(in srgb, var(--warn) 18%, var(--surface)); color:var(--warn);}
+
+  .empty{color:var(--steel); font-size:14px; text-align:center; padding:30px 10px;}
+  .center{text-align:center;}
+  .bigicon{font-size:44px; line-height:1; margin-bottom:6px;}
+  .fineprint{font-size:12px; color:var(--steel); margin-top:14px;}
+  a{color:var(--accent);}
+  @media (prefers-reduced-motion: no-preference){
+    .card, .catbtn{transition:border-color .15s ease;}
+  }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var EMAIL_TO = "drewl@brightstarauctions.com"; // change to your cataloging intake address
+
+  var SUPABASE_URL = "https://johrcgvbpwmlyhepckyo.supabase.co";
+  var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaHJjZ3ZicHdtbHloZXBja3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTcwNTEsImV4cCI6MjEwMTM5MzA1MX0.4dPLdUYNuFP9zDflQCYJ62YtK-yFXI0UDBF2VKr6y8g";
+
+  function supaReady(){
+    return SUPABASE_URL.indexOf("YOUR_SUPABASE") === -1 && SUPABASE_ANON_KEY.indexOf("YOUR_SUPABASE") === -1;
+  }
+
+  function uuid(){
+    if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){
+      var r = Math.random()*16|0, v = c==="x" ? r : (r&0x3|0x8);
+      return v.toString(16);
+    });
+  }
+
+  function dataUrlToBlob(dataUrl){
+    var parts = dataUrl.split(",");
+    var mime = parts[0].match(/:(.*?);/)[1];
+    var bin = atob(parts[1]);
+    var bytes = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], {type:mime});
+  }
+
+  function safeExt(name, fallback){
+    var m = /\.([a-zA-Z0-9]+)$/.exec(name||"");
+    return m ? m[1].toLowerCase() : fallback;
+  }
+
+  function supaUpload(path, blob, contentType){
+    return fetch(SUPABASE_URL+"/storage/v1/object/catalog-uploads/"+path, {
+      method:"POST",
+      headers:{
+        "apikey":SUPABASE_ANON_KEY,
+        "Authorization":"Bearer "+SUPABASE_ANON_KEY,
+        "Content-Type":contentType||"application/octet-stream"
+      },
+      body:blob
+    }).then(function(res){
+      if(!res.ok) throw new Error("Upload failed: "+path);
+      return path;
+    });
+  }
+
+  function supaInsertLot(payload){
+    return fetch(SUPABASE_URL+"/rest/v1/lots", {
+      method:"POST",
+      headers:{
+        "apikey":SUPABASE_ANON_KEY,
+        "Authorization":"Bearer "+SUPABASE_ANON_KEY,
+        "Content-Type":"application/json",
+        "Prefer":"return=representation"
+      },
+      body:JSON.stringify(payload)
+    }).then(function(res){
+      if(!res.ok) throw new Error("Insert failed");
+      return res.json();
+    });
+  }
+
+  function submitLotToSupabase(lot){
+    var lotId = uuid();
+    var cat = CATEGORIES[lot.category];
+    var uploads = [];
+    var photoRefs = [];
+
+    cat.steps.forEach(function(s){
+      var dataUrl = lot.photos[s.id];
+      if(dataUrl){
+        var path = lotId+"/photo-"+s.id+".jpg";
+        uploads.push(
+          supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
+            photoRefs.push({stepId:s.id, title:s.title, path:path});
+          })
+        );
+      }
+    });
+
+    var damageRefs = [];
+    lot.damage.forEach(function(d, i2){
+      if(d.dataUrl){
+        var path = lotId+"/damage-"+i2+".jpg";
+        uploads.push(
+          supaUpload(path, dataUrlToBlob(d.dataUrl), "image/jpeg").then(function(){
+            damageRefs.push({note:d.note, path:path});
+          })
+        );
+      }
+    });
+
+    var videoRef = lot.video && lot.video.na ? {na:true} : null;
+    if(lot.video && lot.video.file){
+      var vpath = lotId+"/video."+safeExt(lot.video.name, "mp4");
+      uploads.push(
+        supaUpload(vpath, lot.video.file, lot.video.file.type || "video/mp4").then(function(){
+          videoRef = {name:lot.video.name, size:lot.video.size, path:vpath};
+        })
+      );
+    }
+
+    return Promise.all(uploads).then(function(){
+      return supaInsertLot({
+        id: lotId,
+        category: lot.category,
+        info: lot.info,
+        condition: lot.cond,
+        attach: {list:lot.attach, other:lot.attachOther},
+        photos: photoRefs,
+        damage: damageRefs,
+        video: videoRef
+      });
+    });
+  }
+
+  var CATEGORIES = {
+    tracked:{
+      label:"Tracked Equipment", desc:"Excavators, dozers, tracked loaders",
+      steps:[
+        {id:"front-left", title:"Front-left corner", instr:"Start here. Back up until the whole machine fits in frame, shot from the front-left corner.", tip:"Tracks to top of cab — nothing cropped off."},
+        {id:"side-left", title:"Left side", instr:"Walk down the left side, stand directly opposite the middle, full profile of the machine."},
+        {id:"rear-left", title:"Back-left corner", instr:"Keep walking to the back-left corner, full machine in frame."},
+        {id:"rear-straight", title:"Back side", instr:"Stand directly behind, centered on the machine."},
+        {id:"rear-right", title:"Back-right corner", instr:"Full machine in frame from the back-right corner."},
+        {id:"side-right", title:"Right side", instr:"Walk up the right side, stand directly opposite the middle, full profile of the machine."},
+        {id:"front-right", title:"Right-front corner", instr:"Full machine in frame from the right-front corner — you're back where you started, on the other side."},
+        {id:"front-straight", title:"Front side", instr:"Stand directly in front, centered on the machine — loop complete."},
+        {id:"serial-plate", title:"Serial / ID plate", instr:"Fill the frame with the plate — every character must be readable.", tip:"Cross-check it matches your title or registration."},
+        {id:"hour-meter", title:"Hour meter reading", instr:"Photograph the meter display clearly showing current hours.", tip:"Key to accessory power if the screen is dark."},
+        {id:"cab-seat", title:"Cab interior — seat", instr:"Shot of the seat and side controls from the door opening."},
+        {id:"cab-dash", title:"Cab interior — dash & gauges", instr:"Shot of the dash, gauges, and any warning lights lit."},
+        {id:"cab-roof", title:"Cab interior — roof & grab handles", instr:"Shot upward showing the headliner, grab handles, and roof condition."},
+        {id:"cab-floor", title:"Cab interior — floor & pedals", instr:"Shot of the floor mat and foot pedals from the seat."},
+        {id:"engine-bay", title:"Engine compartment — overall", instr:"Open the hood/side doors and photograph the full engine bay.", naAllowed:true},
+        {id:"engine-belts", title:"Engine — belts & hoses close-up", instr:"Close-up on belts and hoses — look for cracking or wear.", naAllowed:true},
+        {id:"radiator", title:"Radiator / cooling fins", instr:"Close-up of the radiator face — check for bent fins or debris.", naAllowed:true},
+        {id:"undercarriage-l-full", title:"Left track — full length", instr:"Get low, capture the entire left track from front to back."},
+        {id:"undercarriage-l-drive", title:"Left track — sprocket & final drive", instr:"Close-up of the drive sprocket and final drive housing."},
+        {id:"undercarriage-l-idler", title:"Left track — front idler & rollers", instr:"Close-up of the front idler and track rollers."},
+        {id:"undercarriage-r-full", title:"Right track — full length", instr:"Same shot, opposite side."},
+        {id:"undercarriage-r-drive", title:"Right track — sprocket & final drive", instr:"Close-up of the drive sprocket and final drive housing."},
+        {id:"undercarriage-r-idler", title:"Right track — front idler & rollers", instr:"Close-up of the front idler and track rollers."},
+        {id:"pad-wear-l", title:"Left track pad wear", instr:"Close-up on a few pads — show remaining pad height.", tip:"Worn pads and sprockets are a $5,000-$15,000 repair — buyers look here first."},
+        {id:"pad-wear-r", title:"Right track pad wear", instr:"Same shot, opposite side."},
+        {id:"attachment-overall", title:"Attachment — overall", instr:"Full shot of the bucket, blade, or attachment currently mounted.", naAllowed:true},
+        {id:"attachment-edge", title:"Attachment — cutting edge / teeth", instr:"Close-up of the bucket teeth or cutting edge showing wear.", naAllowed:true},
+        {id:"attachment-pins", title:"Attachment pins & bushings", instr:"Close-up of the pins and bushings connecting the attachment.", naAllowed:true},
+        {id:"hydraulics-boom", title:"Boom cylinder close-up", instr:"Close-up of the boom cylinder — look for weeping or scoring.", naAllowed:true},
+        {id:"hydraulics-hoses", title:"Hydraulic hose routing & fittings", instr:"Close-up of hose fittings and routing along the boom/arm.", naAllowed:true},
+        {id:"structure-boom", title:"Boom & stick — structure", instr:"Full-length shot of the boom and stick, checking for cracks or repairs."},
+        {id:"structure-rear", title:"Counterweight / rear frame", instr:"Shot of the counterweight and rear frame structure."}
+      ],
+      attachments:["Bucket","Quick coupler / thumb","Blade","Ripper"]
+    },
+    wheeled:{
+      label:"Wheeled Machine", desc:"Loaders, graders, wheeled skid steers",
+      steps:[
+        {id:"front-left", title:"Front-left corner", instr:"Start here. Back up until the whole machine fits in frame, shot from the front-left corner."},
+        {id:"side-left", title:"Left side", instr:"Walk down the left side, stand directly opposite the middle, full profile of the machine."},
+        {id:"rear-left", title:"Back-left corner", instr:"Keep walking to the back-left corner, full machine in frame."},
+        {id:"rear-straight", title:"Back side", instr:"Stand directly behind, centered on the machine."},
+        {id:"rear-right", title:"Back-right corner", instr:"Full machine in frame from the back-right corner."},
+        {id:"side-right", title:"Right side", instr:"Walk up the right side, stand directly opposite the middle, full profile of the machine."},
+        {id:"front-right", title:"Right-front corner", instr:"Full machine in frame from the right-front corner — you're back where you started, on the other side."},
+        {id:"front-straight", title:"Front side", instr:"Stand directly in front, centered on the machine — loop complete."},
+        {id:"serial-plate", title:"Serial / ID plate", instr:"Fill the frame with the plate — every character must be readable."},
+        {id:"hour-meter", title:"Hour meter reading", instr:"Photograph the meter display clearly showing current hours."},
+        {id:"cab-seat", title:"Cab / operator area — seat", instr:"Shot of the seat and controls from the door or platform."},
+        {id:"cab-dash", title:"Cab / operator area — dash & gauges", instr:"Shot of the dash, gauges, and any warning lights lit."},
+        {id:"cab-floor", title:"Cab / operator area — floor & pedals", instr:"Shot of the floor and foot pedals from the seat."},
+        {id:"engine-bay", title:"Engine compartment — overall", instr:"Open the hood and photograph the full engine bay.", naAllowed:true},
+        {id:"engine-belts", title:"Engine — belts & hoses close-up", instr:"Close-up on belts and hoses — look for cracking or wear.", naAllowed:true},
+        {id:"tire-fl-tread", title:"Tire — front left, tread", instr:"Straight-on shot of the tread face — note wear pattern."},
+        {id:"tire-fl-side", title:"Tire — front left, sidewall", instr:"Close-up of the sidewall — flag cracking or bulges."},
+        {id:"tire-fr-tread", title:"Tire — front right, tread", instr:"Same shot, opposite side."},
+        {id:"tire-fr-side", title:"Tire — front right, sidewall", instr:"Close-up of the sidewall — flag cracking or bulges."},
+        {id:"tire-rl-tread", title:"Tire — rear left, tread", instr:"Straight-on shot of the tread face — note wear pattern."},
+        {id:"tire-rl-side", title:"Tire — rear left, sidewall", instr:"Close-up of the sidewall — flag cracking or bulges."},
+        {id:"tire-rr-tread", title:"Tire — rear right, tread", instr:"Same shot, opposite side."},
+        {id:"tire-rr-side", title:"Tire — rear right, sidewall", instr:"Close-up of the sidewall — flag cracking or bulges."},
+        {id:"hydraulics-lift", title:"Lift cylinder close-up", instr:"Close-up of the lift cylinder — look for weeping or scoring.", naAllowed:true},
+        {id:"hydraulics-tilt", title:"Tilt cylinder close-up", instr:"Close-up of the tilt cylinder and linkage.", naAllowed:true},
+        {id:"attachment-pins", title:"Attachment pins close-up", instr:"Close-up of the pins connecting the attachment.", naAllowed:true},
+        {id:"attachment-overall", title:"Attachment / bucket — overall", instr:"Full shot of the bucket or attachment currently mounted.", naAllowed:true},
+        {id:"attachment-edge", title:"Attachment — cutting edge / teeth", instr:"Close-up of the cutting edge or teeth showing wear.", naAllowed:true},
+        {id:"frame-joint", title:"Articulation joint / frame", instr:"Close-up of the center articulation joint or main frame."},
+        {id:"frame-rear", title:"Rear frame / counterweight", instr:"Shot of the rear frame or counterweight area."}
+      ],
+      attachments:["Bucket","Forks","Grapple","Snow blade / pusher"]
+    },
+    trucks:{
+      label:"Trucks & Trailers", desc:"Dump trucks, flatbeds, trailers",
+      steps:[
+        {id:"front-left-corner", title:"Front-left corner", instr:"Start here. Full vehicle in frame from the front-left corner."},
+        {id:"driver-side", title:"Left side (driver side)", instr:"Walk down the left side, stand back far enough to capture the full length of the vehicle."},
+        {id:"rear-left-corner", title:"Back-left corner", instr:"Keep walking to the back-left corner, full vehicle in frame."},
+        {id:"rear", title:"Back side", instr:"Center the whole rear/tailgate in frame."},
+        {id:"rear-right-corner", title:"Back-right corner", instr:"Full vehicle in frame from the back-right corner."},
+        {id:"pass-side", title:"Right side (passenger side)", instr:"Walk up the right side, full length of the vehicle."},
+        {id:"front-right-corner", title:"Right-front corner", instr:"Full vehicle in frame from the right-front corner — back where you started, other side."},
+        {id:"front", title:"Front side", instr:"Center the whole front end in frame — loop complete."},
+        {id:"vin-plate", title:"VIN plate / door sticker", instr:"Close-up of the VIN — every character legible."},
+        {id:"odometer", title:"Odometer reading", instr:"Photograph the dash showing current mileage."},
+        {id:"cab-interior", title:"Cab interior — seats & dash", instr:"Shot of the seats and dash from the driver door."},
+        {id:"cab-dash-close", title:"Cab interior — dash close-up", instr:"Close-up of the gauge cluster and any warning lights lit."},
+        {id:"door-jamb", title:"Door jamb / step area", instr:"Shot of the door jamb and step — rust and wear show here first."},
+        {id:"engine-bay", title:"Engine compartment — overall", instr:"Open the hood and photograph the full engine bay.", naAllowed:true},
+        {id:"engine-belts", title:"Engine — belts & hoses close-up", instr:"Close-up on belts and hoses — look for cracking or wear.", naAllowed:true},
+        {id:"bed-deck", title:"Bed / deck, empty", instr:"Standing at the front of the bed, shoot straight down the full length."},
+        {id:"bed-floor", title:"Bed / deck floor close-up", instr:"Close-up on the floor — flag rust-through or patch welds."},
+        {id:"tailgate", title:"Tailgate / gate hardware", instr:"Close-up of the tailgate latch and hinges.", naAllowed:true},
+        {id:"tire-fl-tread", title:"Tire — front left, tread", instr:"Straight-on shot of the tread face."},
+        {id:"tire-fl-side", title:"Tire — front left, sidewall", instr:"Close-up of the sidewall — flag cracking or brand mismatch."},
+        {id:"tire-fr-tread", title:"Tire — front right, tread", instr:"Same shot, opposite side."},
+        {id:"tire-fr-side", title:"Tire — front right, sidewall", instr:"Close-up of the sidewall — flag cracking or brand mismatch."},
+        {id:"tire-rl-tread", title:"Tire — rear left, tread", instr:"Straight-on shot of the tread face."},
+        {id:"tire-rl-side", title:"Tire — rear left, sidewall", instr:"Close-up of the sidewall — flag cracking or brand mismatch."},
+        {id:"tire-rr-tread", title:"Tire — rear right, tread", instr:"Same shot, opposite side."},
+        {id:"tire-rr-side", title:"Tire — rear right, sidewall", instr:"Close-up of the sidewall — flag cracking or brand mismatch."},
+        {id:"frame", title:"Frame & undercarriage", instr:"Shot of the frame rails — flag rust-through or visible damage."},
+        {id:"suspension", title:"Suspension & axle close-up", instr:"Close-up of springs/airbags and axle housing."},
+        {id:"title-doc", title:"Title / registration", instr:"Photograph the title or registration document.", naAllowed:true},
+        {id:"records-doc", title:"Maintenance sticker / service records", instr:"Photograph a service sticker or any maintenance paperwork you have.", naAllowed:true}
+      ],
+      attachments:["Headache rack","Toolboxes","Lift gate","Spare tire","Ramps"]
+    },
+    ag:{
+      label:"Ag Equipment", desc:"Tractors, combines, ag attachments",
+      steps:[
+        {id:"front-left", title:"Front-left corner", instr:"Start here. Back up until the whole machine fits in frame, shot from the front-left corner."},
+        {id:"side-left", title:"Left side", instr:"Walk down the left side, stand directly opposite the middle, full profile of the machine."},
+        {id:"rear-left", title:"Back-left corner", instr:"Keep walking to the back-left corner, full machine in frame."},
+        {id:"rear-straight", title:"Back side", instr:"Stand directly behind, centered on the machine."},
+        {id:"rear-right", title:"Back-right corner", instr:"Full machine in frame from the back-right corner."},
+        {id:"side-right", title:"Right side", instr:"Walk up the right side, stand directly opposite the middle, full profile of the machine."},
+        {id:"front-right", title:"Right-front corner", instr:"Full machine in frame from the right-front corner — you're back where you started, on the other side."},
+        {id:"front-straight", title:"Front side", instr:"Stand directly in front, centered on the machine — loop complete."},
+        {id:"serial-plate", title:"Serial / ID plate", instr:"Fill the frame with the plate — every character must be readable."},
+        {id:"hour-meter", title:"Hour meter reading", instr:"Photograph the meter display clearly showing current hours."},
+        {id:"cab-seat", title:"Cab / operator area — seat", instr:"Shot of the seat and controls."},
+        {id:"cab-dash", title:"Cab / operator area — dash & gauges", instr:"Shot of the dash, gauges, and any warning lights lit."},
+        {id:"cab-floor", title:"Cab / operator area — floor & pedals", instr:"Shot of the floor and foot pedals from the seat."},
+        {id:"engine-bay", title:"Engine compartment — overall", instr:"Open the hood and photograph the full engine bay.", naAllowed:true},
+        {id:"engine-belts", title:"Engine — belts & hoses close-up", instr:"Close-up on belts and hoses — look for cracking or wear.", naAllowed:true},
+        {id:"tire-fl-tread", title:"Tire / duals — front left, tread", instr:"Straight-on shot of the tread face."},
+        {id:"tire-fl-side", title:"Tire / duals — front left, sidewall", instr:"Close-up of the sidewall — flag cracking or uneven wear."},
+        {id:"tire-fr-tread", title:"Tire / duals — front right, tread", instr:"Same shot, opposite side."},
+        {id:"tire-fr-side", title:"Tire / duals — front right, sidewall", instr:"Close-up of the sidewall — flag cracking or uneven wear."},
+        {id:"tire-rl-tread", title:"Tire / duals — rear left, tread", instr:"Straight-on shot of the tread face."},
+        {id:"tire-rl-side", title:"Tire / duals — rear left, sidewall", instr:"Close-up of the sidewall — flag cracking or uneven wear."},
+        {id:"tire-rr-tread", title:"Tire / duals — rear right, tread", instr:"Same shot, opposite side."},
+        {id:"tire-rr-side", title:"Tire / duals — rear right, sidewall", instr:"Close-up of the sidewall — flag cracking or uneven wear."},
+        {id:"pto", title:"PTO shaft close-up", instr:"Close-up of the PTO shaft and shield."},
+        {id:"hitch", title:"3-point hitch arms", instr:"Close-up of the hitch arms and lift links."},
+        {id:"drawbar", title:"Drawbar / rear hitch point", instr:"Shot of the drawbar or rear hitch point."},
+        {id:"header-overall", title:"Header / front attachment — overall", instr:"Full-width shot of the header or front attachment, if equipped.", naAllowed:true},
+        {id:"header-edge", title:"Header — cutting edge / reel close-up", instr:"Close-up of the cutting edge, reel, or pickup, if equipped.", naAllowed:true},
+        {id:"attachment-mount", title:"Attachment mount / quick-coupler", instr:"Close-up of the mount point connecting any implement.", naAllowed:true},
+        {id:"frame", title:"Frame / chassis", instr:"Shot of the frame or chassis rails, checking for cracks or repairs."}
+      ],
+      attachments:["Loader / bucket","3-point implements","Duals","Header"]
+    },
+    small:{
+      label:"Attachments & Small Equipment", desc:"Buckets, generators, compressors, misc.",
+      steps:[
+        {id:"overall-front", title:"Overall — front", instr:"Whole item in frame, front view."},
+        {id:"overall-side", title:"Overall — side", instr:"Whole item in frame, side view."},
+        {id:"overall-back", title:"Overall — back", instr:"Whole item in frame, back view."},
+        {id:"tag", title:"Serial / model tag", instr:"Close-up of the ID tag or stamped serial — legible.", naAllowed:true},
+        {id:"wear-points", title:"Wear points / connections", instr:"Close-up of cutting edges, pins, or connection points."}
+      ],
+      attachments:null
+    },
+    other:{
+      label:"Other / General", desc:"Anything that doesn't fit above",
+      steps:[
+        {id:"side-a", title:"Side A", instr:"Whole item in frame."},
+        {id:"side-b", title:"Side B", instr:"Whole item in frame, opposite side."},
+        {id:"side-c", title:"Side C", instr:"Whole item in frame, third side."},
+        {id:"side-d", title:"Side D / top", instr:"Fourth side or top-down view."},
+        {id:"tag", title:"ID marking, if present", instr:"Close-up of any serial, tag, or stamped marking.", naAllowed:true},
+        {id:"hour-meter", title:"Hour / usage meter, if equipped", instr:"Photograph the meter or gauge display.", naAllowed:true}
+      ],
+      attachments:null
+    }
+  };
+
+  var state = {
+    screen:"welcome",
+    photoIndex:0,
+    lotNum:1,
+    lots:[],
+    cur:freshLot()
+  };
+
+  function freshLot(){
+    return {
+      category:null,
+      info:{seller:"", make:"", model:"", year:"", serial:"", meter:"", location:""},
+      photos:{}, naFlags:{},
+      video:null,
+      damage:[],
+      cond:{starts:"", moves:"", hydraulics:"", lights:"", leaks:"", issues:"", records:"", notes:""},
+      attach:[], attachOther:"",
+      ack:false
+    };
+  }
+
+  var pendingTarget = null;
+  var fileInput = document.createElement("input");
+  fileInput.type = "file"; fileInput.accept = "image/*"; fileInput.capture = "environment";
+  fileInput.style.display = "none";
+  document.body.appendChild(fileInput);
+  fileInput.addEventListener("change", function(e){
+    var f = e.target.files[0];
+    fileInput.value = "";
+    if(!f || !pendingTarget) return;
+    resizeImage(f, 1400, function(dataUrl){
+      if(pendingTarget.type === "step"){
+        state.cur.photos[pendingTarget.id] = dataUrl;
+        delete state.cur.naFlags[pendingTarget.id];
+      } else if(pendingTarget.type === "damage"){
+        pendingTarget.item.dataUrl = dataUrl;
+      }
+      pendingTarget = null;
+      render();
+    });
+  });
+
+  function resizeImage(file, maxDim, cb){
+    var img = new Image();
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      img.onload = function(){
+        var w = img.width, h = img.height, scale = Math.min(1, maxDim / Math.max(w,h));
+        var cw = Math.round(w*scale), ch = Math.round(h*scale);
+        var canvas = document.createElement("canvas");
+        canvas.width = cw; canvas.height = ch;
+        canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+        cb(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function openCamera(target){ pendingTarget = target; fileInput.click(); }
+
+  var videoInput = document.createElement("input");
+  videoInput.type = "file"; videoInput.accept = "video/*"; videoInput.capture = "environment";
+  videoInput.style.display = "none";
+  document.body.appendChild(videoInput);
+  videoInput.addEventListener("change", function(e){
+    var f = e.target.files[0];
+    videoInput.value = "";
+    if(!f) return;
+    state.cur.video = {file:f, name:f.name || "video", size:f.size, url:URL.createObjectURL(f), na:false};
+    render();
+  });
+
+  function formatBytes(n){
+    if(!n) return "";
+    var mb = n/1048576;
+    return mb>=1 ? mb.toFixed(1)+" MB" : Math.round(n/1024)+" KB";
+  }
+
+  function el(html){
+    var t = document.createElement("template");
+    t.innerHTML = html.trim();
+    return t.content.firstElementChild;
+  }
+  function on(node, evt, fn){ node.addEventListener(evt, fn); return node; }
+  function esc(s){ return (s||"").replace(/[&<>"']/g, function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+
+  var STAGE_ORDER = ["category","basicInfo","photos","video","condition","attachments","review"];
+
+  function currentCategory(){ return state.cur.category ? CATEGORIES[state.cur.category] : null; }
+  function hasAttachPhase(){ var c = currentCategory(); return c && c.attachments; }
+  function activeStages(){
+    return STAGE_ORDER.filter(function(s){ return s!=="attachments" || hasAttachPhase(); });
+  }
+  function stageIndex(){
+    var s = state.screen;
+    if(s==="welcome") return -1;
+    if(s==="lotSaved"||s==="finish") return activeStages().length;
+    return activeStages().indexOf(s);
+  }
+
+  function photoStepDone(step){
+    return !!state.cur.photos[step.id] || !!state.cur.naFlags[step.id];
+  }
+  function allPhotosDone(){
+    var cat = currentCategory(); if(!cat) return false;
+    return cat.steps.every(photoStepDone);
+  }
+  function missingPhotoCount(){
+    var cat = currentCategory(); if(!cat) return 0;
+    return cat.steps.filter(function(s){ return !photoStepDone(s); }).length;
+  }
+  function basicInfoDone(){
+    var i = state.cur.info;
+    return i.make.trim() && i.model.trim() && (i.serial||"").trim();
+  }
+
+  function renderTopbar(root){
+    var top = el('<header class="topbar"></header>');
+    var brandLabel = state.screen==="welcome" ? "Start a new lot" :
+      (currentCategory() ? currentCategory().label : "Equipment Self-Catalog");
+    top.appendChild(el(
+      '<div class="brandrow">'+
+        '<div class="brand">Bright Star Auctions<small>'+esc(brandLabel)+'</small></div>'+
+        '<div class="lotbadge">LOT '+state.lotNum+(state.lots.length? " · "+state.lots.length+" saved":"")+'</div>'+
+      '</div>'
+    ));
+    var idx = stageIndex();
+    if(idx >= 0){
+      var stages = activeStages();
+      var track = el('<div class="stagetrack"></div>');
+      stages.forEach(function(s, i2){
+        var cls = i2 < idx ? "done" : (i2===idx ? "active" : "");
+        track.appendChild(el('<i class="'+cls+'"></i>'));
+      });
+      top.appendChild(track);
+    }
+    root.appendChild(top);
+  }
+
+  function screenHeader(main, stageLabel, title, sub){
+    if(stageLabel) main.appendChild(el('<p class="stagelabel">'+esc(stageLabel)+'</p>'));
+    main.appendChild(el('<h1 class="screentitle">'+esc(title)+'</h1>'));
+    if(sub) main.appendChild(el('<p class="sub">'+sub+'</p>'));
+  }
+
+  function render(){
+    var app = document.getElementById("app");
+    app.innerHTML = "";
+    renderTopbar(app);
+    var main = el('<main></main>');
+    app.appendChild(main);
+
+    if(state.screen==="welcome") return renderWelcome(main, app);
+    if(state.screen==="category") return renderCategory(main, app);
+    if(state.screen==="basicInfo") return renderBasicInfo(main, app);
+    if(state.screen==="photos") return renderPhotos(main, app);
+    if(state.screen==="video") return renderVideo(main, app);
+    if(state.screen==="condition") return renderCondition(main, app);
+    if(state.screen==="attachments") return renderAttachments(main, app);
+    if(state.screen==="review") return renderReview(main, app);
+    if(state.screen==="lotSaved") return renderLotSaved(main, app);
+    if(state.screen==="finish") return renderFinish(main, app);
+  }
+
+  function renderFooter(app, backFn, nextLabel, nextFn, nextDisabled){
+    var foot = el('<footer class="navbar"></footer>');
+    if(backFn){
+      foot.appendChild(on(el('<button class="btn ghost">Back</button>'), "click", backFn));
+    }
+    var nb = el('<button class="btn primary">'+esc(nextLabel)+'</button>');
+    if(nextDisabled) nb.disabled = true;
+    on(nb, "click", nextFn);
+    foot.appendChild(nb);
+    app.appendChild(foot);
+  }
+
+  function renderWelcome(main, app){
+    main.appendChild(el(
+      '<div class="card tagcard center">'+
+        '<div class="bigicon">🚜</div>'+
+        '<h1 class="screentitle">Catalog Your Equipment</h1>'+
+        '<p class="sub" style="margin:0 auto;">A guided, step-by-step walkthrough so your listing looks professional — '+
+        'the same shots and details our own catalogers capture, in an order that\'s hard to mess up.</p>'+
+      '</div>'
+    ));
+    main.appendChild(el(
+      '<div class="callout">'+
+        '<h3>Before you start</h3>'+
+        '<ol>'+
+          '<li><b>One item at a time.</b> You\'ll pick a machine type, then work through a fixed shot list.</li>'+
+          '<li><b>Good light matters more than a good camera.</b> Shoot outdoors, midday if possible, avoid deep shadows.</li>'+
+          '<li><b>Say what you know — and what you don\'t.</b> The condition section keeps facts, what you observed, and your best guesses separate. That protects you and the buyer.</li>'+
+          '<li><b>Our team reviews everything</b> before it goes live, same as always.</li>'+
+        '</ol>'+
+      '</div>'
+    ));
+    renderFooter(app, null, "Start First Lot", function(){ state.screen="category"; render(); });
+  }
+
+  function renderCategory(main, app){
+    screenHeader(main, "Step 1 of "+activeStages().length, "What are you cataloging?",
+      "Pick the closest match — this sets the exact photo list you'll follow.");
+    var grid = el('<div class="catgrid"></div>');
+    Object.keys(CATEGORIES).forEach(function(key){
+      var c = CATEGORIES[key];
+      var b = el('<button class="catbtn"><span class="name">'+esc(c.label)+'</span><span class="desc">'+esc(c.desc)+'</span></button>');
+      on(b, "click", function(){
+        state.cur.category = key;
+        state.screen = "basicInfo";
+        render();
+      });
+      grid.appendChild(b);
+    });
+    main.appendChild(grid);
+    renderFooter(app, function(){ state.screen="welcome"; render(); }, "Next", function(){}, true);
+    app.querySelector("footer .btn.primary").style.display = "none";
+  }
+
+  function fieldRow(label, hint, value, oninput, opts){
+    opts = opts || {};
+    var wrap = el('<div class="field"></div>');
+    wrap.appendChild(el('<label>'+esc(label)+(hint?' <span class="hint">— '+esc(hint)+'</span>':'')+'</label>'));
+    var inp = el('<input type="'+(opts.type||"text")+'">');
+    inp.value = value || "";
+    if(opts.placeholder) inp.placeholder = opts.placeholder;
+    on(inp, "input", function(e){ oninput(e.target.value); });
+    wrap.appendChild(inp);
+    return wrap;
+  }
+
+  function renderBasicInfo(main, app){
+    screenHeader(main, "Step 2 of "+activeStages().length, "Basic details",
+      "Grab these off the machine itself where you can — the serial plate and title, not memory.");
+    var card = el('<div class="card"></div>');
+    var i = state.cur.info;
+    var grid = el('<div class="grid2"></div>');
+    grid.appendChild(fieldRow("Make", null, i.make, function(v){ i.make=v; }, {placeholder:"John Deere"}));
+    grid.appendChild(fieldRow("Model", null, i.model, function(v){ i.model=v; }, {placeholder:"310SL"}));
+    grid.appendChild(fieldRow("Year", null, i.year, function(v){ i.year=v; }, {placeholder:"2019", type:"text"}));
+    grid.appendChild(fieldRow("Hour / odometer reading", null, i.meter, function(v){ i.meter=v; }, {placeholder:"4,215"}));
+    card.appendChild(grid);
+    card.appendChild(fieldRow("Serial / VIN / PIN", "must match the plate you'll photograph next", i.serial, function(v){ i.serial=v; }, {placeholder:"1FT..."}));
+    card.appendChild(fieldRow("Where is it located?", "city/county is fine", i.location, function(v){ i.location=v; }, {placeholder:"Salina, KS"}));
+    card.appendChild(fieldRow("Your name", "so we can reach you with questions", i.seller, function(v){ i.seller=v; }));
+    main.appendChild(card);
+    renderFooter(app,
+      function(){ state.screen="category"; render(); },
+      "Next: Photos",
+      function(){
+        if(!basicInfoDone()){ alert("Make, model, and serial number are required before moving on."); return; }
+        state.photoIndex = 0; state.screen="photos"; render();
+      }
+    );
+  }
+
+  function renderPhotos(main, app){
+    var cat = currentCategory();
+    var step = cat.steps[state.photoIndex];
+    screenHeader(main, "Step 3 of "+activeStages().length+" — Photo "+(state.photoIndex+1)+" of "+cat.steps.length, step.title, step.instr);
+
+    var card = el('<div class="card photostep"></div>');
+    var meta = el('<div class="stepmeta"><span class="stepcount">SHOT '+(state.photoIndex+1)+' / '+cat.steps.length+'</span>'+
+      (step.naAllowed? '' : '<span class="req">Required</span>')+'</div>');
+    card.appendChild(meta);
+
+    var frame = el('<div class="frame"></div>');
+    var photo = state.cur.photos[step.id];
+    var isNA = state.cur.naFlags[step.id];
+    if(photo){
+      frame.appendChild(el('<img src="'+photo+'">'));
+    } else if(isNA){
+      frame.appendChild(el('<div class="na">Marked not applicable</div>'));
+    } else {
+      frame.appendChild(el('<div class="placeholder">No photo yet — tap "Take Photo" below</div>'));
+    }
+    card.appendChild(frame);
+
+    var btnrow = el('<div class="btnrow"></div>');
+    var takeBtn = el('<button class="btn primary">'+(photo?"Retake Photo":"Take Photo")+'</button>');
+    on(takeBtn, "click", function(){ openCamera({type:"step", id:step.id}); });
+    btnrow.appendChild(takeBtn);
+    if(step.naAllowed && !photo){
+      var naBtn = el('<button class="btn ghost">'+(isNA?"Undo — Not Applicable":"Not Applicable")+'</button>');
+      on(naBtn, "click", function(){
+        if(isNA) delete state.cur.naFlags[step.id]; else state.cur.naFlags[step.id]=true;
+        render();
+      });
+      btnrow.appendChild(naBtn);
+    }
+    card.appendChild(btnrow);
+    if(step.tip) card.appendChild(el('<div class="tip">'+esc(step.tip)+'</div>'));
+    main.appendChild(card);
+
+    renderFooter(app,
+      function(){
+        if(state.photoIndex===0){ state.screen="basicInfo"; }
+        else { state.photoIndex--; }
+        render();
+      },
+      state.photoIndex === cat.steps.length-1 ? "Next: Video" : "Next Photo",
+      function(){
+        if(!photoStepDone(step)){ alert("Take a photo or mark this shot not applicable before continuing."); return; }
+        if(state.photoIndex === cat.steps.length-1){ state.screen="video"; }
+        else { state.photoIndex++; }
+        render();
+      }
+    );
+  }
+
+  function renderVideo(main, app){
+    screenHeader(main, "Step 4 of "+activeStages().length, "Operating video",
+      "This is the single most convincing thing in the whole listing — buyers who see it running bid with more confidence.");
+
+    main.appendChild(el(
+      '<div class="callout">'+
+        '<h3>What to capture — about 2 minutes</h3>'+
+        '<ol>'+
+          '<li>Start the engine — let the camera catch it starting and idling.</li>'+
+          '<li>Move it under its own power — drive, track, or turn a short distance.</li>'+
+          '<li>Cycle anything that moves — raise/lower the boom, bucket, blade, or attachment.</li>'+
+          '<li>Walk a slow circle around it while recording, so buyers see all sides in motion.</li>'+
+          '<li>Hold your phone sideways (landscape) and keep it steady.</li>'+
+        '</ol>'+
+      '</div>'
+    ));
+
+    var card = el('<div class="card photostep"></div>');
+    var video = state.cur.video;
+    var hasVideo = video && video.url;
+    var isNA = video && video.na;
+    var meta = el('<div class="stepmeta"><span class="stepcount">OPERATING VIDEO</span>'+(isNA? '' : '<span class="req">Required</span>')+'</div>');
+    card.appendChild(meta);
+
+    var frame = el('<div class="frame"></div>');
+    if(hasVideo){
+      var vtag = el('<video controls style="width:100%;height:100%;object-fit:contain;background:#000;"></video>');
+      vtag.src = video.url;
+      frame.appendChild(vtag);
+    } else if(isNA){
+      frame.appendChild(el('<div class="na">Marked not applicable</div>'));
+    } else {
+      frame.appendChild(el('<div class="placeholder">No video yet — tap "Record / Choose Video" below</div>'));
+    }
+    card.appendChild(frame);
+
+    var btnrow = el('<div class="btnrow"></div>');
+    var takeBtn = el('<button class="btn primary">'+(hasVideo?"Replace Video":"Record / Choose Video")+'</button>');
+    on(takeBtn, "click", function(){ videoInput.click(); });
+    btnrow.appendChild(takeBtn);
+    if(!hasVideo){
+      var naBtn = el('<button class="btn ghost">'+(isNA?"Undo — Not Applicable":"Skip — Won't Run / N/A")+'</button>');
+      on(naBtn, "click", function(){
+        state.cur.video = isNA ? null : {na:true};
+        render();
+      });
+      btnrow.appendChild(naBtn);
+    }
+    card.appendChild(btnrow);
+    if(hasVideo) card.appendChild(el('<div class="tip">'+esc(video.name)+' — '+formatBytes(video.size)+'</div>'));
+    main.appendChild(card);
+
+    var canProceed = hasVideo || isNA;
+    renderFooter(app,
+      function(){ state.photoIndex = currentCategory().steps.length-1; state.screen="photos"; render(); },
+      "Next: Condition",
+      function(){
+        if(!canProceed){ alert("Record a video or mark it not applicable before continuing."); return; }
+        state.screen="condition"; render();
+      }
+    );
+  }
+
+  function choiceRow(container, question, hint, key, options){
+    var row = el('<div class="qrow"></div>');
+    row.appendChild(el('<span class="qlabel">'+esc(question)+'</span>'));
+    if(hint) row.appendChild(el('<div class="qhint">'+esc(hint)+'</div>'));
+    var choices = el('<div class="choices"></div>');
+    options.forEach(function(opt){
+      var lbl = el('<label'+(state.cur.cond[key]===opt?' class="picked"':'')+'><input type="radio" name="'+key+'">'+esc(opt)+'</label>');
+      var input = lbl.querySelector("input");
+      input.checked = state.cur.cond[key]===opt;
+      on(input, "change", function(){ state.cur.cond[key]=opt; render(); });
+      choices.appendChild(lbl);
+    });
+    row.appendChild(choices);
+    container.appendChild(row);
+  }
+
+  function renderCondition(main, app){
+    screenHeader(main, "Step 5 of "+activeStages().length, "Condition & disclosure",
+      "This is what protects both you and the buyer. Be specific — vague answers cause disputes after the sale.");
+
+    main.appendChild(el(
+      '<div class="callout">'+
+        '<h3>How to answer</h3>'+
+        '<ol>'+
+          '<li><b>Facts</b> — make, model, serial. You already entered these.</li>'+
+          '<li><b>What you observed</b> — "started on the second try," "bucket raised and lowered when photographed." Not "runs and drives" — say what you actually saw it do.</li>'+
+          '<li><b>What you were told, not verified</b> — label it that way ("previous owner said...").</li>'+
+          '<li><b>Unknown</b> — it\'s fine to say you don\'t know. Guessing is worse than admitting a gap.</li>'+
+        '</ol>'+
+      '</div>'
+    ));
+
+    var card = el('<div class="card"></div>');
+    choiceRow(card, "Did the engine start when you photographed it?", null, "starts", ["Yes","No","Unknown","N/A"]);
+    choiceRow(card, "Did it move under its own power?", null, "moves", ["Yes","No","Unknown","N/A"]);
+    choiceRow(card, "Do the hydraulics function (lift, tilt, etc.)?", null, "hydraulics", ["Yes","No","Unknown","N/A"]);
+    choiceRow(card, "Any warning or check-engine lights on?", null, "lights", ["Yes","No","Unknown"]);
+    choiceRow(card, "Any visible fluid leaks?", null, "leaks", ["Yes","No","Unknown"]);
+    var recRow = el('<div class="qrow"></div>');
+    choiceRow2(recRow, "Do you have maintenance records?", "records", ["Yes","No"]);
+    card.appendChild(recRow);
+    main.appendChild(card);
+
+    var textcard = el('<div class="card"></div>');
+    textcard.appendChild(fieldRow2("Known mechanical issues", "list anything you know is wrong, even minor", state.cur.cond.issues, function(v){ state.cur.cond.issues=v; }, true));
+    textcard.appendChild(fieldRow2("Additional notes", "anything else a buyer should know", state.cur.cond.notes, function(v){ state.cur.cond.notes=v; }, true));
+    main.appendChild(textcard);
+
+    var dcard = el('<div class="card"></div>');
+    dcard.appendChild(el('<span class="qlabel">Photograph anything you listed above</span>'));
+    dcard.appendChild(el('<div class="qhint">Each issue gets its own close-up photo, so buyers see exactly what you\'re describing.</div>'));
+    var list = el('<div class="damagelist"></div>');
+    state.cur.damage.forEach(function(d, i2){
+      var row = el('<div class="damageitem"></div>');
+      if(d.dataUrl) row.appendChild(el('<img src="'+d.dataUrl+'">'));
+      else row.appendChild(el('<div style="width:56px;height:56px;border-radius:6px;background:var(--surface-2);flex-shrink:0;"></div>'));
+      var txt = el('<div class="txt"></div>');
+      var ta = el('<textarea placeholder="Describe this issue" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:7px;font-family:inherit;font-size:13px;"></textarea>');
+      ta.value = d.note || "";
+      on(ta, "input", function(e){ d.note = e.target.value; });
+      txt.appendChild(ta);
+      var camBtn = el('<button class="btn ghost" style="margin-top:6px;padding:6px 10px;font-size:12px;">'+(d.dataUrl?"Retake":"Add Photo")+'</button>');
+      on(camBtn, "click", function(){ openCamera({type:"damage", item:d}); });
+      txt.appendChild(camBtn);
+      row.appendChild(txt);
+      var rm = el('<button class="rm">Remove</button>');
+      on(rm, "click", function(){ state.cur.damage.splice(i2,1); render(); });
+      row.appendChild(rm);
+      list.appendChild(row);
+    });
+    dcard.appendChild(list);
+    var addBtn = el('<button class="btn ghost full" style="margin-top:10px;">+ Add an Issue</button>');
+    on(addBtn, "click", function(){ state.cur.damage.push({note:"", dataUrl:null}); render(); });
+    dcard.appendChild(addBtn);
+    main.appendChild(dcard);
+
+    renderFooter(app,
+      function(){ state.screen="video"; render(); },
+      hasAttachPhase() ? "Next: Attachments" : "Next: Review",
+      function(){ state.screen = hasAttachPhase() ? "attachments" : "review"; render(); }
+    );
+  }
+
+  function choiceRow2(row, question, key, options){
+    row.appendChild(el('<span class="qlabel">'+esc(question)+'</span>'));
+    var choices = el('<div class="choices"></div>');
+    options.forEach(function(opt){
+      var lbl = el('<label><input type="radio" name="'+key+'">'+esc(opt)+'</label>');
+      var input = lbl.querySelector("input");
+      input.checked = state.cur.cond[key]===opt;
+      on(input, "change", function(){ state.cur.cond[key]=opt; render(); });
+      choices.appendChild(lbl);
+    });
+    row.appendChild(choices);
+  }
+
+  function fieldRow2(label, hint, value, oninput, isTextarea){
+    var wrap = el('<div class="field"></div>');
+    wrap.appendChild(el('<label>'+esc(label)+(hint?' <span class="hint">— '+esc(hint)+'</span>':'')+'</label>'));
+    var inp = isTextarea ? el('<textarea></textarea>') : el('<input type="text">');
+    inp.value = value || "";
+    on(inp, "input", function(e){ oninput(e.target.value); });
+    wrap.appendChild(inp);
+    return wrap;
+  }
+
+  function renderAttachments(main, app){
+    var cat = currentCategory();
+    screenHeader(main, "Step 6 of "+activeStages().length, "What's included in the sale?",
+      "Check everything that will transfer with this item — anything not checked is assumed excluded.");
+    var card = el('<div class="card"></div>');
+    var grid = el('<div class="checkgrid"></div>');
+    cat.attachments.forEach(function(opt){
+      var lbl = el('<label><input type="checkbox">'+esc(opt)+'</label>');
+      var input = lbl.querySelector("input");
+      input.checked = state.cur.attach.indexOf(opt) > -1;
+      on(input, "change", function(){
+        var i2 = state.cur.attach.indexOf(opt);
+        if(input.checked && i2===-1) state.cur.attach.push(opt);
+        if(!input.checked && i2>-1) state.cur.attach.splice(i2,1);
+      });
+      grid.appendChild(lbl);
+    });
+    card.appendChild(grid);
+    card.appendChild(fieldRow2("Other attachments/items included", null, state.cur.attachOther, function(v){ state.cur.attachOther=v; }));
+    main.appendChild(card);
+    renderFooter(app,
+      function(){ state.screen="condition"; render(); },
+      "Next: Review",
+      function(){ state.screen="review"; render(); }
+    );
+  }
+
+  function renderReview(main, app){
+    var cat = currentCategory();
+    screenHeader(main, "Step "+activeStages().length+" of "+activeStages().length, "Review this lot",
+      "Check every shot before saving. Missing required photos are flagged below.");
+
+    var missing = missingPhotoCount();
+    var card = el('<div class="card"></div>');
+    card.appendChild(el('<span class="qlabel">'+esc(cat.label)+' — '+(missing? '<span class="pill warn">'+missing+' missing</span>' : '<span class="pill good">All shots complete</span>')+'</span>'));
+    var thumbs = el('<div class="thumbgrid"></div>');
+    cat.steps.forEach(function(s){
+      var photo = state.cur.photos[s.id];
+      var na = state.cur.naFlags[s.id];
+      var t;
+      if(photo){ t = el('<div class="t"><img src="'+photo+'"><span class="lbl">'+esc(s.title)+'</span></div>'); }
+      else if(na){ t = el('<div class="t"><span class="lbl">'+esc(s.title)+' — N/A</span></div>'); }
+      else { t = el('<div class="t missing"><span>'+esc(s.title)+' missing</span></div>'); }
+      on(t, "click", function(){ state.photoIndex = cat.steps.indexOf(s); state.screen="photos"; render(); });
+      thumbs.appendChild(t);
+    });
+    card.appendChild(thumbs);
+    main.appendChild(card);
+
+    var i = state.cur.info;
+    var kv = el('<div class="card"></div>');
+    kv.appendChild(el('<span class="qlabel">Basic info</span>'));
+    kv.appendChild(el(
+      '<dl class="kv" style="margin-top:8px;">'+
+      '<dt>Make/Model</dt><dd>'+esc(i.make)+' '+esc(i.model)+'</dd>'+
+      '<dt>Year</dt><dd>'+esc(i.year||"—")+'</dd>'+
+      '<dt>Serial</dt><dd>'+esc(i.serial)+'</dd>'+
+      '<dt>Meter</dt><dd>'+esc(i.meter||"—")+'</dd>'+
+      '<dt>Location</dt><dd>'+esc(i.location||"—")+'</dd>'+
+      '</dl>'
+    ));
+    main.appendChild(kv);
+
+    var c = state.cur.cond;
+    var cc = el('<div class="card"></div>');
+    cc.appendChild(el('<span class="qlabel">Condition & disclosure</span>'));
+    cc.appendChild(el(
+      '<dl class="kv" style="margin-top:8px;">'+
+      '<dt>Starts</dt><dd>'+esc(c.starts||"—")+'</dd>'+
+      '<dt>Moves</dt><dd>'+esc(c.moves||"—")+'</dd>'+
+      '<dt>Hydraulics</dt><dd>'+esc(c.hydraulics||"—")+'</dd>'+
+      '<dt>Warning lights</dt><dd>'+esc(c.lights||"—")+'</dd>'+
+      '<dt>Leaks</dt><dd>'+esc(c.leaks||"—")+'</dd>'+
+      '<dt>Records</dt><dd>'+esc(c.records||"—")+'</dd>'+
+      '</dl>'
+    ));
+    if(c.issues) cc.appendChild(el('<p style="margin-top:10px;font-size:13.5px;"><b>Known issues:</b> '+esc(c.issues)+'</p>'));
+    if(state.cur.damage.length) cc.appendChild(el('<p style="margin-top:6px;font-size:13.5px;"><b>Documented items:</b> '+state.cur.damage.length+' with photos attached</p>'));
+    main.appendChild(cc);
+
+    var v = state.cur.video;
+    var vc = el('<div class="card"></div>');
+    vc.appendChild(el('<span class="qlabel">Operating video</span>'));
+    if(v && v.url) vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">'+esc(v.name)+' — '+formatBytes(v.size)+'</p>'));
+    else if(v && v.na) vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">Marked not applicable.</p>'));
+    else vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;color:var(--warn);">Not recorded — go back to add one.</p>'));
+    main.appendChild(vc);
+
+    if(hasAttachPhase()){
+      var ac = el('<div class="card"></div>');
+      ac.appendChild(el('<span class="qlabel">Included with sale</span>'));
+      ac.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">'+(state.cur.attach.concat(state.cur.attachOther?[state.cur.attachOther]:[]).map(esc).join(", ") || "Nothing selected")+'</p>'));
+      main.appendChild(ac);
+    }
+
+    var ackCard = el('<div class="card"></div>');
+    var ackLbl = el('<label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;"><input type="checkbox" style="margin-top:3px;accent-color:var(--accent);">I\'ve described this item accurately and to the best of my knowledge, including any known defects.</label>');
+    var ackInput = ackLbl.querySelector("input");
+    ackInput.checked = state.cur.ack;
+    on(ackInput, "change", function(){ state.cur.ack = ackInput.checked; render(); });
+    ackCard.appendChild(ackLbl);
+    main.appendChild(ackCard);
+
+    var canSave = missing===0 && basicInfoDone() && state.cur.ack && !!(v && (v.url || v.na));
+    renderFooter(app,
+      function(){ state.screen = hasAttachPhase() ? "attachments" : "condition"; render(); },
+      "Save This Lot",
+      function(){
+        var btn = this;
+        if(supaReady()){
+          btn.disabled = true;
+          btn.textContent = "Submitting...";
+          submitLotToSupabase(state.cur).then(function(){
+            state.cur.uploaded = true;
+            finishSavingLot();
+          }).catch(function(err){
+            state.cur.uploaded = false;
+            finishSavingLot();
+          });
+        } else {
+          state.cur.uploaded = false;
+          finishSavingLot();
+        }
+      },
+      !canSave
+    );
+  }
+
+  function finishSavingLot(){
+    state.lots.push(state.cur);
+    state.screen = "lotSaved";
+    render();
+  }
+
+  function renderLotSaved(main, app){
+    var uploaded = state.cur.uploaded;
+    var subMsg = uploaded
+      ? "Sent to Bright Star automatically. Catalog another item, or finish up below."
+      : "Saved on this device, but the automatic submission did not go through (no connection, or the admin system is not turned on yet). Download the packet at the end and email it as a backup.";
+    main.appendChild(el(
+      '<div class="card tagcard center">'+
+        '<div class="bigicon">'+(uploaded?"✅":"⚠️")+'</div>'+
+        '<h1 class="screentitle">Lot '+state.lotNum+' Saved</h1>'+
+        '<p class="sub" style="margin:0 auto;">'+(state.cur.info.make||"")+' '+(state.cur.info.model||"")+' — '+esc(subMsg)+'</p>'+
+      '</div>'
+    ));
+    var btns = el('<div class="btnrow" style="flex-direction:column;"></div>');
+    var addBtn = el('<button class="btn primary full">Catalog Another Item</button>');
+    on(addBtn, "click", function(){
+      state.lotNum++; state.cur = freshLot(); state.screen = "category"; render();
+    });
+    var doneBtn = el('<button class="btn full">Finish Session</button>');
+    on(doneBtn, "click", function(){ state.screen="finish"; render(); });
+    btns.appendChild(addBtn); btns.appendChild(doneBtn);
+    main.appendChild(btns);
+  }
+
+  function renderFinish(main, app){
+    var anyFailed = state.lots.some(function(l){ return l.uploaded === false; });
+    screenHeader(main, null, "Session Complete", state.lots.length+" lot(s) catalogued.");
+    var list = el('<div class="card"></div>');
+    if(!state.lots.length){
+      list.appendChild(el('<div class="empty">No lots saved yet.</div>'));
+    } else {
+      state.lots.forEach(function(lot, i2){
+        var shotCount = Object.keys(lot.photos).length;
+        var pill = lot.uploaded ? '<span class="pill good">Sent to Bright Star</span>' : '<span class="pill warn">Not sent — see below</span>';
+        var chip = el(
+          '<div class="lotchip"><div><div class="nm">Lot '+(i2+1)+' — '+esc(lot.info.make)+' '+esc(lot.info.model)+'</div>'+
+          '<div class="meta">S/N '+esc(lot.info.serial||"—")+' · '+shotCount+' photos</div></div>'+
+          pill+'</div>'
+        );
+        list.appendChild(chip);
+      });
+    }
+    main.appendChild(list);
+
+    var anyVideo = state.lots.some(function(l){ return l.video && l.video.url; });
+
+    var statusMsg = anyFailed
+      ? "At least one lot above could not reach Bright Star automatically, likely a weak connection. Download the packet below (and any videos) and email them to "+EMAIL_TO+" so nothing is lost."
+      : "Every lot above was sent to Bright Star automatically. Nothing else is required — the buttons below just give you a personal copy if you want one.";
+    main.appendChild(el(
+      '<div class="callout"><h3>'+(anyFailed?"Some lots need a manual backup":"All sent")+'</h3>'+
+      '<p style="font-size:13.5px;margin:0;">'+esc(statusMsg)+'</p></div>'
+    ));
+
+    var btns = el('<div class="btnrow" style="flex-direction:column;"></div>');
+    var dl = el('<button class="btn '+(anyFailed?"primary":"")+' full">Download Catalog Packet'+(anyFailed?"":" (optional copy)")+'</button>');
+    on(dl, "click", function(){ downloadPacket(); });
+    var btnList = [dl];
+    if(anyFailed){
+      var copyEmailBtn = el('<button class="btn full">Copy Bright Star\'s Email Address</button>');
+      on(copyEmailBtn, "click", function(){ copyText(EMAIL_TO, "Email address copied: "+EMAIL_TO); });
+      var copyBtn = el('<button class="btn full">Copy Summary as Text</button>');
+      on(copyBtn, "click", copySummary);
+      btnList.push(copyEmailBtn, copyBtn);
+    }
+    var moreBtn = el('<button class="btn '+(anyFailed?"ghost":"primary")+' full">Catalog Another Item</button>');
+    on(moreBtn, "click", function(){ state.lotNum++; state.cur = freshLot(); state.screen="category"; render(); });
+    btnList.push(moreBtn);
+    btnList.forEach(function(b){ btns.appendChild(b); });
+    main.appendChild(btns);
+
+    if(anyVideo){
+      var vhint = anyFailed
+        ? "Videos are not included in the packet file — download and attach separately if you're sending the manual backup."
+        : "Already sent with each lot. These downloads are just for your own records.";
+      var vcard = el('<div class="card"></div>');
+      vcard.appendChild(el('<span class="qlabel">Operating videos</span>'));
+      vcard.appendChild(el('<div class="qhint">'+esc(vhint)+'</div>'));
+      state.lots.forEach(function(lot, i2){
+        if(lot.video && lot.video.url){
+          var row = el(
+            '<div class="lotchip"><div><div class="nm">Lot '+(i2+1)+' video</div>'+
+            '<div class="meta">'+esc(lot.video.name)+' — '+formatBytes(lot.video.size)+'</div></div></div>'
+          );
+          var dlv = el('<button class="btn" style="flex-shrink:0;">Download</button>');
+          on(dlv, "click", function(){ downloadVideo(lot); });
+          row.appendChild(dlv);
+          vcard.appendChild(row);
+        }
+      });
+      main.appendChild(vcard);
+    }
+
+    main.appendChild(el('<p class="fineprint">Our team reviews every submission before it goes live — nothing is published automatically.</p>'));
+  }
+
+  function downloadVideo(lot){
+    var a = document.createElement("a");
+    a.href = lot.video.url;
+    a.download = dateStamp()+" "+(lot.info.make||"Equipment")+" "+(lot.info.model||"")+" - "+lot.video.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  function copyText(text, msg){
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){ alert(msg||"Copied."); });
+    } else {
+      var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta);
+      ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+      alert(msg||"Copied.");
+    }
+  }
+
+  function dateStamp(){
+    var d = new Date();
+    function p(n){ return String(n).padStart(2,"0"); }
+    return String(d.getFullYear()).slice(2)+"."+p(d.getMonth()+1)+"."+p(d.getDate());
+  }
+
+  function summaryText(){
+    var out = ["BRIGHT STAR AUCTIONS — EQUIPMENT SELF-CATALOG SUBMISSION", "Generated "+new Date().toLocaleString(), ""];
+    state.lots.forEach(function(lot, i2){
+      var cat = CATEGORIES[lot.category];
+      out.push("=== LOT "+(i2+1)+" — "+cat.label+" ===");
+      out.push("Make/Model: "+lot.info.make+" "+lot.info.model);
+      out.push("Year: "+(lot.info.year||"—"));
+      out.push("Serial/VIN: "+lot.info.serial);
+      out.push("Hour/odometer: "+(lot.info.meter||"—"));
+      out.push("Location: "+(lot.info.location||"—"));
+      out.push("Seller: "+(lot.info.seller||"—"));
+      out.push("Photos captured: "+Object.keys(lot.photos).length+"/"+cat.steps.length);
+      out.push("Video: "+(lot.video && lot.video.url ? lot.video.name+" ("+formatBytes(lot.video.size)+") — download and attach separately" : (lot.video && lot.video.na ? "not applicable" : "not recorded")));
+      out.push("Starts: "+lot.cond.starts+" | Moves: "+lot.cond.moves+" | Hydraulics: "+lot.cond.hydraulics);
+      out.push("Warning lights: "+lot.cond.lights+" | Leaks: "+lot.cond.leaks+" | Maintenance records: "+lot.cond.records);
+      if(lot.cond.issues) out.push("Known issues: "+lot.cond.issues);
+      if(lot.cond.notes) out.push("Notes: "+lot.cond.notes);
+      if(lot.attach && lot.attach.length) out.push("Included: "+lot.attach.concat(lot.attachOther?[lot.attachOther]:[]).join(", "));
+      out.push("");
+    });
+    return out.join("\n");
+  }
+
+  function copySummary(){
+    copyText(summaryText(), "Summary copied — paste it into your email.");
+  }
+
+  function downloadPacket(){
+    var html = buildPacketHtml();
+    var blob = new Blob([html], {type:"text/html"});
+    var url = URL.createObjectURL(blob);
+    var filename = dateStamp()+" Equipment Catalog Submission.html";
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return filename;
+  }
+
+  function buildPacketHtml(){
+    var parts = ['<!doctype html><html><head><meta charset="utf-8"><title>Equipment Catalog Submission</title>',
+      '<style>body{font-family:Arial,sans-serif;max-width:900px;margin:30px auto;color:#1b1f24;}',
+      'h1{font-size:22px;}h2{font-size:17px;border-bottom:2px solid #C1701F;padding-bottom:4px;margin-top:36px;}',
+      'table{border-collapse:collapse;width:100%;margin:10px 0;}td{padding:4px 8px;font-size:13px;vertical-align:top;}',
+      'td.k{color:#5B6472;width:160px;}',
+      '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;}',
+      '.grid figure{margin:0;font-size:11px;}.grid img{width:100%;border-radius:6px;}</style></head><body>'];
+    parts.push("<h1>Bright Star Auctions — Equipment Catalog Submission</h1><p>Generated "+esc(new Date().toLocaleString())+" · "+state.lots.length+" lot(s)</p>");
+    state.lots.forEach(function(lot, i2){
+      var cat = CATEGORIES[lot.category];
+      parts.push("<h2>Lot "+(i2+1)+" — "+esc(cat.label)+": "+esc(lot.info.make)+" "+esc(lot.info.model)+"</h2>");
+      parts.push('<table><tr><td class="k">Year</td><td>'+esc(lot.info.year||"—")+'</td></tr>'+
+        '<tr><td class="k">Serial/VIN</td><td>'+esc(lot.info.serial)+'</td></tr>'+
+        '<tr><td class="k">Hour/odometer</td><td>'+esc(lot.info.meter||"—")+'</td></tr>'+
+        '<tr><td class="k">Location</td><td>'+esc(lot.info.location||"—")+'</td></tr>'+
+        '<tr><td class="k">Seller</td><td>'+esc(lot.info.seller||"—")+'</td></tr>'+
+        '<tr><td class="k">Starts / Moves / Hydraulics</td><td>'+esc(lot.cond.starts)+' / '+esc(lot.cond.moves)+' / '+esc(lot.cond.hydraulics)+'</td></tr>'+
+        '<tr><td class="k">Warning lights / Leaks</td><td>'+esc(lot.cond.lights)+' / '+esc(lot.cond.leaks)+'</td></tr>'+
+        '<tr><td class="k">Maintenance records</td><td>'+esc(lot.cond.records)+'</td></tr>'+
+        '<tr><td class="k">Operating video</td><td>'+esc(lot.video && lot.video.url ? lot.video.name+" ("+formatBytes(lot.video.size)+") — sent as a separate attachment, not embedded" : (lot.video && lot.video.na ? "Not applicable" : "Not recorded"))+'</td></tr>'+
+        (lot.cond.issues? '<tr><td class="k">Known issues</td><td>'+esc(lot.cond.issues)+'</td></tr>':'')+
+        (lot.cond.notes? '<tr><td class="k">Notes</td><td>'+esc(lot.cond.notes)+'</td></tr>':'')+
+        (lot.attach && lot.attach.length? '<tr><td class="k">Included</td><td>'+esc(lot.attach.concat(lot.attachOther?[lot.attachOther]:[]).join(", "))+'</td></tr>':'')+
+        '</table>');
+      parts.push('<div class="grid">');
+      cat.steps.forEach(function(s){
+        var photo = lot.photos[s.id];
+        if(photo) parts.push('<figure><img src="'+photo+'"><figcaption>'+esc(s.title)+'</figcaption></figure>');
+      });
+      lot.damage.forEach(function(d, di){
+        if(d.dataUrl) parts.push('<figure><img src="'+d.dataUrl+'"><figcaption>Issue: '+esc(d.note||"(no note)")+'</figcaption></figure>');
+      });
+      parts.push('</div>');
+    });
+    parts.push("</body></html>");
+    return parts.join("\n");
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
