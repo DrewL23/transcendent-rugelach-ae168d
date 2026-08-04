@@ -269,12 +269,12 @@
         "apikey":SUPABASE_ANON_KEY,
         "Authorization":"Bearer "+SUPABASE_ANON_KEY,
         "Content-Type":"application/json",
-        "Prefer":"return=representation"
+        "Prefer":"return=minimal"
       },
       body:JSON.stringify(payload)
     }).then(function(res){
       if(!res.ok) throw new Error("Insert failed");
-      return res.json();
+      return payload;
     });
   }
 
