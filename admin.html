@@ -148,6 +148,138 @@
     }).catch(function(err){ alert(err.message); });
   }
 
+  function deleteStorageObject(path){
+    return fetch(SUPABASE_URL+"/storage/v1/object/"+BUCKET+"/"+path, {
+      method:"DELETE", headers: authHeaders()
+    }).catch(function(){});
+  }
+
+  function deleteLot(lot){
+    var paths = [];
+    (lot.photos||[]).forEach(function(p){ if(p.path) paths.push(p.path); });
+    (lot.damage||[]).forEach(function(d){ if(d.path) paths.push(d.path); });
+    if(lot.video && lot.video.path) paths.push(lot.video.path);
+    return Promise.all(paths.map(deleteStorageObject)).then(function(){
+      return fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lot.id, {
+        method:"DELETE", headers: authHeaders()
+      });
+    });
+  }
+
+  function uploadFile(path, blobOrFile, contentType){
+    return fetch(SUPABASE_URL+"/storage/v1/object/"+BUCKET+"/"+path, {
+      method:"POST",
+      headers:Object.assign({"Content-Type":contentType||"application/octet-stream"}, authHeaders()),
+      body: blobOrFile
+    }).then(function(res){
+      if(!res.ok) throw new Error("Upload failed: "+path);
+      return path;
+    });
+  }
+
+  function dataUrlToBlobAdmin(dataUrl){
+    var parts = dataUrl.split(",");
+    var mime = (parts[0].match(/:(.*?);/)||[])[1] || "image/jpeg";
+    var bin = atob(parts[1]);
+    var bytes = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], {type:mime});
+  }
+
+  function parsePacket(htmlText){
+    var doc = new DOMParser().parseFromString(htmlText, "text/html");
+    var lots = [];
+    var current = null;
+    Array.prototype.forEach.call(doc.body.children, function(node){
+      var tag = node.tagName;
+      if(tag === "H2"){
+        var m = /^Lot\s+\d+\s+—\s+([^:]+):\s*(.*)$/.exec((node.textContent||"").trim());
+        current = { category: m ? m[1].trim() : "Imported", nameLine: m ? m[2].trim() : (node.textContent||"").trim(), rows:{}, photos:[], damage:[] };
+        lots.push(current);
+      } else if(tag === "TABLE" && current){
+        Array.prototype.forEach.call(node.querySelectorAll("tr"), function(tr){
+          var tds = tr.querySelectorAll("td");
+          if(tds.length>=2) current.rows[(tds[0].textContent||"").trim()] = (tds[1].textContent||"").trim();
+        });
+      } else if(tag === "DIV" && node.classList.contains("grid") && current){
+        Array.prototype.forEach.call(node.querySelectorAll("figure"), function(fig){
+          var img = fig.querySelector("img");
+          var cap = fig.querySelector("figcaption");
+          var capText = cap ? (cap.textContent||"").trim() : "";
+          var dataUrl = img ? img.getAttribute("src") : null;
+          if(!dataUrl) return;
+          if(capText.indexOf("Issue:")===0) current.damage.push({note:capText.slice(6).trim(), dataUrl:dataUrl});
+          else current.photos.push({title:capText, dataUrl:dataUrl});
+        });
+      }
+    });
+    return lots;
+  }
+
+  function importOneLot(pl, videoFile, btn, num, total){
+    var lotId = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : (String(Date.now())+"-"+Math.random());
+    var r = pl.rows;
+    var startsMoves = (r["Starts / Moves / Hydraulics"]||"").split(" / ");
+    var lightsLeaks = (r["Warning lights / Leaks"]||"").split(" / ");
+    var photoRefs = [], damageRefs = [];
+    var uploads = [];
+    var doneCount = 0, totalFiles = pl.photos.length + pl.damage.length + (videoFile?1:0);
+
+    function bump(){ doneCount++; btn.textContent = "Importing lot "+num+"/"+total+" — file "+doneCount+"/"+totalFiles+"..."; }
+
+    pl.photos.forEach(function(p, i2){
+      var path = lotId+"/photo-"+i2+".jpg";
+      uploads.push(uploadFile(path, dataUrlToBlobAdmin(p.dataUrl), "image/jpeg").then(function(){
+        photoRefs.push({stepId:"imported-"+i2, title:p.title, path:path}); bump();
+      }));
+    });
+    pl.damage.forEach(function(d, i2){
+      var path = lotId+"/damage-"+i2+".jpg";
+      uploads.push(uploadFile(path, dataUrlToBlobAdmin(d.dataUrl), "image/jpeg").then(function(){
+        damageRefs.push({note:d.note, path:path}); bump();
+      }));
+    });
+    var videoRef = null;
+    if(videoFile){
+      var vpath = lotId+"/video."+(videoFile.name.split(".").pop()||"mp4");
+      uploads.push(uploadFile(vpath, videoFile, videoFile.type||"video/mp4").then(function(){
+        videoRef = {name:videoFile.name, size:videoFile.size, path:vpath}; bump();
+      }));
+    }
+
+    btn.textContent = "Importing lot "+num+"/"+total+"...";
+
+    return Promise.all(uploads).then(function(){
+      return fetch(SUPABASE_URL+"/rest/v1/lots", {
+        method:"POST",
+        headers:Object.assign({"Content-Type":"application/json","Prefer":"return=minimal"}, authHeaders()),
+        body:JSON.stringify({
+          id: lotId,
+          category: pl.category,
+          info: { make: pl.nameLine, model:"", year:r["Year"]||"", serial:r["Serial/VIN"]||"", meter:r["Hour/odometer"]||"", location:r["Location"]||"", seller:r["Seller"]||"" },
+          condition: { starts:startsMoves[0]||"", moves:startsMoves[1]||"", hydraulics:startsMoves[2]||"", lights:lightsLeaks[0]||"", leaks:lightsLeaks[1]||"", records:r["Maintenance records"]||"", issues:r["Known issues"]||"", notes:r["Notes"]||"" },
+          attach: { list: r["Included"] ? r["Included"].split(", ") : [], other:"" },
+          photos: photoRefs,
+          damage: damageRefs,
+          video: videoRef,
+          status: "new"
+        })
+      }).then(function(res){
+        if(!res.ok) throw new Error("Could not save imported lot "+num+".");
+      });
+    });
+  }
+
+  function importLots(parsedLots, videoFile, btn){
+    var chain = Promise.resolve();
+    parsedLots.forEach(function(pl, idx){
+      chain = chain.then(function(){
+        return importOneLot(pl, (idx===parsedLots.length-1) ? videoFile : null, btn, idx+1, parsedLots.length);
+      });
+    });
+    return chain;
+  }
+
   function render(){
     var app = document.getElementById("app");
     app.innerHTML = "";
@@ -157,6 +289,7 @@
     if(state.screen==="login") return renderLogin(app);
     if(state.screen==="list") return renderList(app);
     if(state.screen==="detail") return renderDetail(app);
+    if(state.screen==="import") return renderImport(app);
   }
 
   function renderLogin(app){
@@ -188,12 +321,14 @@
   function renderList(app){
     var top = el('<div class="toolbar"></div>');
     top.appendChild(el('<h1 class="title" style="margin:0;">Submissions ('+state.lots.length+')</h1>'));
+    var importBtn = el('<button class="btn">Import Manual Submission</button>');
+    on(importBtn, "click", function(){ state.screen = "import"; render(); });
     var refreshBtn = el('<button class="btn">Refresh</button>');
     on(refreshBtn, "click", function(){
       refreshBtn.disabled = true; refreshBtn.textContent = "Refreshing...";
       loadLots().then(function(){ render(); });
     });
-    top.appendChild(refreshBtn);
+    top.appendChild(importBtn); top.appendChild(refreshBtn);
     app.appendChild(top);
 
     if(!state.lots.length){
@@ -312,6 +447,68 @@
     });
     photosCard.appendChild(grid);
     app.appendChild(photosCard);
+
+    var delBtn = el('<button class="btn" style="margin-top:6px;border-color:var(--warn);color:var(--warn);">Delete This Submission</button>');
+    on(delBtn, "click", function(){
+      if(!confirm("Delete this submission and its photos/video? This cannot be undone.")) return;
+      delBtn.disabled = true; delBtn.textContent = "Deleting...";
+      deleteLot(lot).then(function(){
+        return loadLots();
+      }).then(function(){
+        state.screen = "list"; render();
+      }).catch(function(err){ alert(err.message); delBtn.disabled=false; delBtn.textContent="Delete This Submission"; });
+    });
+    app.appendChild(delBtn);
+  }
+
+  function renderImport(app){
+    var back = el('<a class="backlink" href="javascript:void(0)">&larr; Back to all submissions</a>');
+    on(back, "click", function(){ state.screen = "list"; render(); });
+    app.appendChild(back);
+    app.appendChild(el('<h1 class="title">Import Manual Submission</h1>'));
+    app.appendChild(el('<p class="sub">Upload the packet file a seller emailed you (and the video, if there was one) to add it to this list alongside everything else.</p>'));
+
+    var card = el('<div class="card"></div>');
+    card.appendChild(el('<div class="field"><label>Packet file (.html)</label></div>'));
+    var packetInput = el('<input type="file" accept=".html,text/html">');
+    card.appendChild(packetInput);
+    card.appendChild(el('<div class="field" style="margin-top:14px;"><label>Video file (optional)</label></div>'));
+    var videoInput = el('<input type="file" accept="video/*">');
+    card.appendChild(videoInput);
+    card.appendChild(el('<p style="font-size:12.5px;color:var(--steel);margin-top:10px;">If the packet has more than one lot in it, the video (if any) attaches to the last one — fix that manually in Supabase if it needs to go elsewhere.</p>'));
+    var btn = el('<button class="btn primary full" style="margin-top:12px;">Parse & Import</button>');
+    var errBox = el('<div class="err" style="display:none;"></div>');
+    on(btn, "click", function(){
+      var packetFile = packetInput.files[0];
+      var videoFile = videoInput.files[0];
+      errBox.style.display = "none";
+      if(!packetFile){ errBox.textContent = "Choose the packet .html file first."; errBox.style.display="block"; return; }
+      btn.disabled = true; btn.textContent = "Reading packet...";
+      var reader = new FileReader();
+      reader.onload = function(ev){
+        var parsedLots;
+        try{ parsedLots = parsePacket(ev.target.result); }
+        catch(e){
+          errBox.textContent = "Could not read that file — is it the packet .html the app downloaded?";
+          errBox.style.display="block"; btn.disabled=false; btn.textContent="Parse & Import"; return;
+        }
+        if(!parsedLots.length){
+          errBox.textContent = "No lots found in that file.";
+          errBox.style.display="block"; btn.disabled=false; btn.textContent="Parse & Import"; return;
+        }
+        importLots(parsedLots, videoFile, btn).then(function(){
+          return loadLots();
+        }).then(function(){
+          state.screen = "list"; render();
+        }).catch(function(err){
+          errBox.textContent = err.message; errBox.style.display="block";
+          btn.disabled = false; btn.textContent = "Parse & Import";
+        });
+      };
+      reader.readAsText(packetFile);
+    });
+    card.appendChild(btn); card.appendChild(errBox);
+    app.appendChild(card);
   }
 
   var saved = sessionStorage.getItem("bsa_admin_session");
