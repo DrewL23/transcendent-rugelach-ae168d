@@ -247,42 +247,63 @@
     return m ? m[1].toLowerCase() : fallback;
   }
 
+  function withRetry(fn, attemptsLeft){
+    attemptsLeft = attemptsLeft==null ? 3 : attemptsLeft;
+    return fn().catch(function(err){
+      if(attemptsLeft <= 1) throw err;
+      return new Promise(function(resolve){ setTimeout(resolve, 1500); }).then(function(){
+        return withRetry(fn, attemptsLeft-1);
+      });
+    });
+  }
+
   function supaUpload(path, blob, contentType){
-    return fetch(SUPABASE_URL+"/storage/v1/object/catalog-uploads/"+path, {
-      method:"POST",
-      headers:{
-        "apikey":SUPABASE_ANON_KEY,
-        "Authorization":"Bearer "+SUPABASE_ANON_KEY,
-        "Content-Type":contentType||"application/octet-stream"
-      },
-      body:blob
-    }).then(function(res){
-      if(!res.ok) throw new Error("Upload failed: "+path);
-      return path;
+    return withRetry(function(){
+      return fetch(SUPABASE_URL+"/storage/v1/object/catalog-uploads/"+path, {
+        method:"POST",
+        headers:{
+          "apikey":SUPABASE_ANON_KEY,
+          "Authorization":"Bearer "+SUPABASE_ANON_KEY,
+          "Content-Type":contentType||"application/octet-stream"
+        },
+        body:blob
+      }).then(function(res){
+        if(!res.ok) throw new Error("Upload failed: "+path);
+        return path;
+      });
     });
   }
 
   function supaInsertLot(payload){
-    return fetch(SUPABASE_URL+"/rest/v1/lots", {
-      method:"POST",
-      headers:{
-        "apikey":SUPABASE_ANON_KEY,
-        "Authorization":"Bearer "+SUPABASE_ANON_KEY,
-        "Content-Type":"application/json",
-        "Prefer":"return=minimal"
-      },
-      body:JSON.stringify(payload)
-    }).then(function(res){
-      if(!res.ok) throw new Error("Insert failed");
-      return payload;
+    return withRetry(function(){
+      return fetch(SUPABASE_URL+"/rest/v1/lots", {
+        method:"POST",
+        headers:{
+          "apikey":SUPABASE_ANON_KEY,
+          "Authorization":"Bearer "+SUPABASE_ANON_KEY,
+          "Content-Type":"application/json",
+          "Prefer":"return=minimal"
+        },
+        body:JSON.stringify(payload)
+      }).then(function(res){
+        if(!res.ok) throw new Error("Insert failed");
+        return payload;
+      });
     });
   }
 
-  function submitLotToSupabase(lot){
+  function submitLotToSupabase(lot, onProgress){
     var lotId = uuid();
     var cat = CATEGORIES[lot.category];
     var uploads = [];
     var photoRefs = [];
+    var totalFiles = 0, doneFiles = 0;
+
+    cat.steps.forEach(function(s){ if(lot.photos[s.id]) totalFiles++; });
+    lot.damage.forEach(function(d){ if(d.dataUrl) totalFiles++; });
+    if(lot.video && lot.video.file) totalFiles++;
+
+    function bump(){ doneFiles++; if(onProgress) onProgress(doneFiles, totalFiles); }
 
     cat.steps.forEach(function(s){
       var dataUrl = lot.photos[s.id];
@@ -291,6 +312,7 @@
         uploads.push(
           supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
             photoRefs.push({stepId:s.id, title:s.title, path:path});
+            bump();
           })
         );
       }
@@ -303,6 +325,7 @@
         uploads.push(
           supaUpload(path, dataUrlToBlob(d.dataUrl), "image/jpeg").then(function(){
             damageRefs.push({note:d.note, path:path});
+            bump();
           })
         );
       }
@@ -314,6 +337,7 @@
       uploads.push(
         supaUpload(vpath, lot.video.file, lot.video.file.type || "video/mp4").then(function(){
           videoRef = {name:lot.video.name, size:lot.video.size, path:vpath};
+          bump();
         })
       );
     }
@@ -1095,7 +1119,9 @@
         if(supaReady()){
           btn.disabled = true;
           btn.textContent = "Submitting...";
-          submitLotToSupabase(state.cur).then(function(){
+          submitLotToSupabase(state.cur, function(done, total){
+            if(total) btn.textContent = "Submitting "+done+"/"+total+"...";
+          }).then(function(){
             state.cur.uploaded = true;
             finishSavingLot();
           }).catch(function(err){
