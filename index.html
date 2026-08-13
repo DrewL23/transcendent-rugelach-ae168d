@@ -503,6 +503,44 @@
       ],
       attachments:["Loader / bucket","3-point implements","Duals","Header"]
     },
+    sawmill:{
+      label:"Sawmill / Processors & Bandmills", desc:"Sawmills, wood processors, bandmills",
+      steps:[
+        {id:"front-left", title:"Front-left corner", instr:"Start here. Back up until the whole unit fits in frame, shot from the front-left corner."},
+        {id:"side-left", title:"Left side", instr:"Walk down the left side, stand directly opposite the middle, full profile of the unit."},
+        {id:"rear-left", title:"Back-left corner", instr:"Keep walking to the back-left corner, full unit in frame."},
+        {id:"rear-straight", title:"Back side", instr:"Stand directly behind, centered on the unit."},
+        {id:"rear-right", title:"Back-right corner", instr:"Full unit in frame from the back-right corner."},
+        {id:"side-right", title:"Right side", instr:"Walk up the right side, stand directly opposite the middle, full profile of the unit."},
+        {id:"front-right", title:"Right-front corner", instr:"Full unit in frame from the right-front corner — you're back where you started, on the other side."},
+        {id:"front-straight", title:"Front side", instr:"Stand directly in front, centered on the unit — loop complete."},
+        {id:"serial-plate", title:"Serial / ID plate", instr:"Fill the frame with the plate — every character must be readable.", tip:"Cross-check it matches your title or registration."},
+        {id:"hour-meter", title:"Hour meter reading", instr:"Photograph the meter display clearly showing current hours."},
+        {id:"saw-overall", title:"The saw — overall", instr:"Full shot of the saw head, blade, or cutting unit."},
+        {id:"saw-blade", title:"Saw blade / teeth close-up", instr:"Close-up of the blade or teeth — note wear, missing teeth, or damage.", naAllowed:true},
+        {id:"conveyor-overall", title:"The conveyor — overall", instr:"Full shot of the conveyor from end to end."},
+        {id:"conveyor-close", title:"Conveyor rollers / chain close-up", instr:"Close-up of the rollers, chain, or belt — note wear."},
+        {id:"wheels-left", title:"Wheels / tires — left side", instr:"Close-up of the wheels or tires on the left side."},
+        {id:"wheels-right", title:"Wheels / tires — right side", instr:"Close-up of the wheels or tires on the right side."},
+        {id:"feed-in", title:"Feed-in / log deck", instr:"Shot of the infeed area or log deck."},
+        {id:"feed-out", title:"Feed-out / discharge", instr:"Shot of the outfeed or discharge area."},
+        {id:"feed-hydraulics", title:"Feed hydraulic hoses & cylinders", instr:"Close-up of the feed hydraulic hoses and cylinders — check for weeping or cracking."},
+        {id:"hydraulic-tank", title:"Hydraulic tank / reservoir", instr:"Shot of the hydraulic tank — note fluid level or leaks, if visible.", naAllowed:true},
+        {id:"engine-bay", title:"Engine compartment — overall", instr:"Open the compartment and photograph the full engine bay.", naAllowed:true},
+        {id:"engine-belts", title:"Engine — belts & hoses close-up", instr:"Close-up on belts and hoses — look for cracking or wear.", naAllowed:true},
+        {id:"control-panel", title:"Control panel / control box", instr:"Shot of the controls, switches, and gauges."},
+        {id:"compartment-tool", title:"Tool / storage compartment", instr:"Open and photograph any tool or storage compartment.", naAllowed:true},
+        {id:"compartment-fuel", title:"Fuel tank / fuel compartment", instr:"Shot of the fuel tank or fuel compartment.", naAllowed:true},
+        {id:"hitch", title:"Hitch / tongue, if trailer-mounted", instr:"Close-up of the hitch and coupler.", naAllowed:true},
+        {id:"axle", title:"Axle & tires, if trailer-mounted", instr:"Shot of the axle, springs, and tires underneath.", naAllowed:true},
+        {id:"blade-guides", title:"Blade guides / rails", instr:"Close-up of the blade guides or rail system, if equipped.", naAllowed:true},
+        {id:"frame", title:"Frame / structure — overall", instr:"Shot of the frame and structure, checking for cracks or repairs."},
+        {id:"safety-guards", title:"Safety guards / shielding", instr:"Shot of the belt, chain, or blade guards and shielding.", naAllowed:true},
+        {id:"attachment", title:"Additional attachment, if equipped", instr:"Photograph any debarker, edger, or other attached equipment.", naAllowed:true},
+        {id:"capacity-decal", title:"Capacity / spec decal, if present", instr:"Close-up of any decal showing cut capacity or specifications.", naAllowed:true}
+      ],
+      attachments:["Extra blades","Debarker attachment","Edger attachment","Trailer (if separate)"]
+    },
     small:{
       label:"Attachments & Small Equipment", desc:"Buckets, generators, compressors, misc.",
       steps:[
@@ -539,7 +577,7 @@
   function freshLot(){
     return {
       category:null,
-      info:{seller:"", make:"", model:"", year:"", serial:"", meter:"", location:""},
+      info:{seller:"", make:"", model:"", year:"", serial:"", meter:"", location:"", cutCapacity:""},
       photos:{}, naFlags:{},
       video:null,
       damage:[],
@@ -783,6 +821,9 @@
     grid.appendChild(fieldRow("Hour / odometer reading", null, i.meter, function(v){ i.meter=v; }, {placeholder:"4,215"}));
     card.appendChild(grid);
     card.appendChild(fieldRow("Serial / VIN / PIN", "must match the plate you'll photograph next", i.serial, function(v){ i.serial=v; }, {placeholder:"1FT..."}));
+    if(state.cur.category==="sawmill"){
+      card.appendChild(fieldRow("Cut capacity", "max log diameter or board width it handles", i.cutCapacity, function(v){ i.cutCapacity=v; }, {placeholder:"36 in"}));
+    }
     card.appendChild(fieldRow("Where is it located?", "city/county is fine", i.location, function(v){ i.location=v; }, {placeholder:"Salina, KS"}));
     card.appendChild(fieldRow("Your name", "so we can reach you with questions", i.seller, function(v){ i.seller=v; }));
     main.appendChild(card);
@@ -1077,6 +1118,7 @@
       '<dt>Year</dt><dd>'+esc(i.year||"—")+'</dd>'+
       '<dt>Serial</dt><dd>'+esc(i.serial)+'</dd>'+
       '<dt>Meter</dt><dd>'+esc(i.meter||"—")+'</dd>'+
+      (i.cutCapacity ? '<dt>Cut capacity</dt><dd>'+esc(i.cutCapacity)+'</dd>' : '')+
       '<dt>Location</dt><dd>'+esc(i.location||"—")+'</dd>'+
       '</dl>'
     ));
@@ -1282,6 +1324,7 @@
       out.push("Year: "+(lot.info.year||"—"));
       out.push("Serial/VIN: "+lot.info.serial);
       out.push("Hour/odometer: "+(lot.info.meter||"—"));
+      if(lot.info.cutCapacity) out.push("Cut capacity: "+lot.info.cutCapacity);
       out.push("Location: "+(lot.info.location||"—"));
       out.push("Seller: "+(lot.info.seller||"—"));
       out.push("Photos captured: "+Object.keys(lot.photos).length+"/"+cat.steps.length);
@@ -1328,6 +1371,7 @@
       parts.push('<table><tr><td class="k">Year</td><td>'+esc(lot.info.year||"—")+'</td></tr>'+
         '<tr><td class="k">Serial/VIN</td><td>'+esc(lot.info.serial)+'</td></tr>'+
         '<tr><td class="k">Hour/odometer</td><td>'+esc(lot.info.meter||"—")+'</td></tr>'+
+        (lot.info.cutCapacity? '<tr><td class="k">Cut capacity</td><td>'+esc(lot.info.cutCapacity)+'</td></tr>':'')+
         '<tr><td class="k">Location</td><td>'+esc(lot.info.location||"—")+'</td></tr>'+
         '<tr><td class="k">Seller</td><td>'+esc(lot.info.seller||"—")+'</td></tr>'+
         '<tr><td class="k">Starts / Moves / Hydraulics</td><td>'+esc(lot.cond.starts)+' / '+esc(lot.cond.moves)+' / '+esc(lot.cond.hydraulics)+'</td></tr>'+
