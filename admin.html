@@ -111,7 +111,7 @@
       return res.json();
     }).then(function(session){
       state.session = session;
-      sessionStorage.setItem("bsa_admin_session", JSON.stringify(session));
+      try{ sessionStorage.setItem("bsa_admin_session", JSON.stringify(session)); }catch(e){}
     });
   }
 
@@ -151,6 +151,80 @@
 
   function slugify(s){
     return (s||"photo").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"") || "photo";
+  }
+
+  function blobToDataUrl(blob){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(){ resolve(reader.result); };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function downloadLotAsHtml(lot, btn){
+    var info = lot.info || {}, cond = lot.condition || {}, attach = lot.attach || {};
+    var origText = btn.textContent;
+    btn.disabled = true; btn.textContent = "Building...";
+
+    var items = (lot.photos||[]).map(function(p){ return {title:p.title||p.stepId, path:p.path}; })
+      .concat((lot.damage||[]).map(function(d, i2){ return {title:"Issue: "+(d.note||("issue-"+i2)), path:d.path}; }));
+    var loaded = 0;
+
+    var chain = items.reduce(function(prev, item){
+      return prev.then(function(){
+        return fetchAsBlob(item.path).then(blobToDataUrl).then(function(dataUrl){
+          item.dataUrl = dataUrl;
+          loaded++; btn.textContent = "Building... ("+loaded+"/"+items.length+")";
+        });
+      });
+    }, Promise.resolve());
+
+    chain.then(function(){
+      var parts = ['<!doctype html><html><head><meta charset="utf-8"><title>Equipment Catalog Submission</title>',
+        '<style>body{font-family:Arial,sans-serif;max-width:900px;margin:30px auto;color:#1b1f24;}',
+        'h1{font-size:22px;}h2{font-size:17px;border-bottom:2px solid #C1701F;padding-bottom:4px;margin-top:20px;}',
+        'table{border-collapse:collapse;width:100%;margin:10px 0;}td{padding:4px 8px;font-size:13px;vertical-align:top;}',
+        'td.k{color:#5B6472;width:160px;}',
+        '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px;}',
+        '.grid figure{margin:0;font-size:11px;}.grid img{width:100%;border-radius:6px;}</style></head><body>'];
+      parts.push("<h1>Bright Star Auctions — Equipment Catalog Submission</h1><p>Generated "+esc(new Date().toLocaleString())+"</p>");
+      parts.push("<h2>"+esc(lot.category)+": "+esc(info.make)+" "+esc(info.model)+"</h2>");
+      var videoRow = lot.video && lot.video.path
+        ? esc(lot.video.name||"")+" ("+formatBytes(lot.video.size)+") — download separately from the admin page, not embedded here"
+        : (lot.video && lot.video.na ? "Not applicable" : "Not recorded");
+      parts.push('<table>'+
+        '<tr><td class="k">Year</td><td>'+esc(info.year||"—")+'</td></tr>'+
+        '<tr><td class="k">Serial/VIN</td><td>'+esc(info.serial||"—")+'</td></tr>'+
+        '<tr><td class="k">Hour/odometer</td><td>'+esc(info.meter||"—")+'</td></tr>'+
+        (info.cutCapacity? '<tr><td class="k">Cut capacity</td><td>'+esc(info.cutCapacity)+'</td></tr>':'')+
+        '<tr><td class="k">Location</td><td>'+esc(info.location||"—")+'</td></tr>'+
+        '<tr><td class="k">Seller</td><td>'+esc(info.seller||"—")+'</td></tr>'+
+        '<tr><td class="k">Starts / Moves / Hydraulics</td><td>'+esc(cond.starts||"—")+' / '+esc(cond.moves||"—")+' / '+esc(cond.hydraulics||"—")+'</td></tr>'+
+        '<tr><td class="k">Warning lights / Leaks</td><td>'+esc(cond.lights||"—")+' / '+esc(cond.leaks||"—")+'</td></tr>'+
+        '<tr><td class="k">Maintenance records</td><td>'+esc(cond.records||"—")+'</td></tr>'+
+        '<tr><td class="k">Operating video</td><td>'+videoRow+'</td></tr>'+
+        (cond.issues? '<tr><td class="k">Known issues</td><td>'+esc(cond.issues)+'</td></tr>':'')+
+        (cond.notes? '<tr><td class="k">Notes</td><td>'+esc(cond.notes)+'</td></tr>':'')+
+        (attach.list && attach.list.length? '<tr><td class="k">Included</td><td>'+esc(attach.list.concat(attach.other?[attach.other]:[]).join(", "))+'</td></tr>':'')+
+        '</table>');
+      parts.push('<div class="grid">');
+      items.forEach(function(item){
+        if(item.dataUrl) parts.push('<figure><img src="'+item.dataUrl+'"><figcaption>'+esc(item.title)+'</figcaption></figure>');
+      });
+      parts.push('</div></body></html>');
+      var blob = new Blob([parts.join("\n")], {type:"text/html"});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = slugify((info.make||"lot")+"-"+(info.model||""))+"-submission.html";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      btn.disabled = false; btn.textContent = origText;
+    }).catch(function(err){
+      alert("Could not build the HTML file: "+err.message);
+      btn.disabled = false; btn.textContent = origText;
+    });
   }
 
   function downloadAllPhotosZip(lot, btn){
@@ -406,6 +480,10 @@
     app.appendChild(el('<h1 class="title">'+esc(info.make)+' '+esc(info.model)+'</h1>'));
     app.appendChild(el('<p class="sub">'+esc(lot.category)+' · submitted '+esc(new Date(lot.created_at).toLocaleString())+'</p>'));
 
+    var htmlBtn = el('<button class="btn primary full" style="margin-bottom:14px;">Download as HTML</button>');
+    on(htmlBtn, "click", function(){ downloadLotAsHtml(lot, htmlBtn); });
+    app.appendChild(htmlBtn);
+
     var statusCard = el('<div class="card"></div>');
     statusCard.appendChild(el('<span class="qlabel">Status</span>'));
     var sel = el(
@@ -560,7 +638,8 @@
     app.appendChild(card);
   }
 
-  var saved = sessionStorage.getItem("bsa_admin_session");
+  var saved = null;
+  try{ saved = sessionStorage.getItem("bsa_admin_session"); }catch(e){ saved = null; }
   if(saved){
     try{
       state.session = JSON.parse(saved);
