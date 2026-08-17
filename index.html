@@ -123,6 +123,10 @@
     font-size:13px; color:var(--steel); background:var(--surface-2); border-radius:6px;
     padding:8px 10px; margin-top:10px; border-left:3px solid var(--accent);
   }
+  .rotatebanner{
+    background:var(--accent); color:var(--accent-ink); font-weight:800; text-align:center;
+    padding:12px 14px; border-radius:8px; margin-bottom:12px; font-size:15px; line-height:1.35;
+  }
 
   .btnrow{display:flex; gap:10px; flex-wrap:wrap;}
   .btn{
@@ -859,6 +863,8 @@
     }
     card.appendChild(frame);
 
+    card.appendChild(el('<div class="rotatebanner">📱 Turn your phone to the side and take photos from the side to get the full width of the picture.</div>'));
+
     var btnrow = el('<div class="btnrow"></div>');
     var takeBtn = el('<button class="btn primary">'+(photo?"Retake Photo":"Take Photo")+'</button>');
     on(takeBtn, "click", function(){ openCamera({type:"step", id:step.id}); });
@@ -926,6 +932,8 @@
       frame.appendChild(el('<div class="placeholder">No video yet — tap "Record / Choose Video" below</div>'));
     }
     card.appendChild(frame);
+
+    card.appendChild(el('<div class="rotatebanner">📱 Turn your phone to the side and record from the side to get the full width of the picture.</div>'));
 
     var btnrow = el('<div class="btnrow"></div>');
     var takeBtn = el('<button class="btn primary">'+(hasVideo?"Replace Video":"Record / Choose Video")+'</button>');
