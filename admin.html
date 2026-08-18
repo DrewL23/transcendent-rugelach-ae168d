@@ -537,6 +537,14 @@
       on(row, "click", function(){ state.current = lot; state.screen = "detail"; render(); });
       app.appendChild(row);
     });
+
+    if(state.lots.some(function(l){ return l.status === "in_progress"; })){
+      pollTimer = setInterval(function(){
+        loadLots().then(function(){
+          if(state.screen === "list") render();
+        });
+      }, 8000);
+    }
   }
 
   function renderDetail(app){
