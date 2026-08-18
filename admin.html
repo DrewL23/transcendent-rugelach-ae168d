@@ -53,6 +53,7 @@
   .pill.new{background:color-mix(in srgb, var(--accent) 18%, var(--surface)); color:var(--accent);}
   .pill.reviewed{background:color-mix(in srgb, var(--good) 18%, var(--surface)); color:var(--good);}
   .pill.imported{background:var(--steel-soft); color:var(--steel);}
+  .pill.in_progress{background:color-mix(in srgb, var(--warn) 18%, var(--surface)); color:var(--warn);}
 
   .kv{display:grid; grid-template-columns:auto 1fr; gap:5px 12px; font-size:14px;}
   .kv dt{color:var(--steel);}
@@ -450,7 +451,10 @@
     return chain;
   }
 
+  var pollTimer = null;
+
   function render(){
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
     var app = document.getElementById("app");
     app.innerHTML = "";
     app.appendChild(el(
@@ -553,6 +557,7 @@
     statusCard.appendChild(el('<span class="qlabel">Status</span>'));
     var sel = el(
       '<select class="statusselect">'+
+        '<option value="in_progress">In Progress (seller still cataloging)</option>'+
         '<option value="new">New</option>'+
         '<option value="reviewed">Reviewed</option>'+
         '<option value="imported">Imported to bidding site</option>'+
@@ -651,6 +656,24 @@
       }).catch(function(err){ alert(err.message); delBtn.disabled=false; delBtn.textContent="Delete This Submission"; });
     });
     app.appendChild(delBtn);
+
+    if(lot.status === "in_progress"){
+      app.appendChild(el('<p class="fineprint" style="text-align:center;">Watching for new photos every few seconds while the seller is still cataloging...</p>'));
+      pollTimer = setInterval(function(){
+        fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lot.id+"&select=*", {headers:authHeaders()})
+          .then(function(res){ return res.ok ? res.json() : null; })
+          .then(function(rows){
+            if(!rows || !rows[0]) return;
+            var fresh = rows[0];
+            var idx = state.lots.findIndex(function(l){ return l.id===fresh.id; });
+            if(idx>-1) state.lots[idx] = fresh;
+            if(state.current && state.current.id===fresh.id && state.screen==="detail"){
+              state.current = fresh;
+              render();
+            }
+          }).catch(function(){});
+      }, 8000);
+    }
   }
 
   function renderImport(app){

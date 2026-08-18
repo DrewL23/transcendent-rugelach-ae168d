@@ -278,8 +278,11 @@
     });
   }
 
-  function supaInsertLot(payload){
-    return withRetry(function(){
+  function ensureRemoteLot(lot){
+    if(lot.remoteId) return Promise.resolve(lot.remoteId);
+    if(lot.remoteCreating) return lot.remoteCreating;
+    var id = uuid();
+    lot.remoteCreating = withRetry(function(){
       return fetch(SUPABASE_URL+"/rest/v1/lots", {
         method:"POST",
         headers:{
@@ -288,74 +291,119 @@
           "Content-Type":"application/json",
           "Prefer":"return=minimal"
         },
-        body:JSON.stringify(payload)
-      }).then(function(res){
-        if(!res.ok) throw new Error("Insert failed");
-        return payload;
-      });
+        body:JSON.stringify({id:id, category:lot.category, status:"in_progress", info:{}, condition:{}, attach:{}, photos:[], damage:[], video:null})
+      }).then(function(res){ if(!res.ok) throw new Error("create failed"); return id; });
+    }).then(function(){
+      lot.remoteId = id;
+      return id;
+    }).catch(function(err){
+      lot.remoteCreating = null;
+      throw err;
+    });
+    return lot.remoteCreating;
+  }
+
+  function patchRemoteLot(lot, fields){
+    if(!lot.remoteId) return Promise.resolve();
+    return withRetry(function(){
+      return fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lot.remoteId, {
+        method:"PATCH",
+        headers:{
+          "apikey":SUPABASE_ANON_KEY,
+          "Authorization":"Bearer "+SUPABASE_ANON_KEY,
+          "Content-Type":"application/json",
+          "Prefer":"return=minimal"
+        },
+        body:JSON.stringify(fields)
+      }).then(function(res){ if(!res.ok) throw new Error("patch failed"); });
     });
   }
 
-  function submitLotToSupabase(lot, onProgress){
-    var lotId = uuid();
+  function syncPhotoLive(lot, step, dataUrl){
+    if(!supaReady()) return;
+    ensureRemoteLot(lot).then(function(){
+      var path = lot.remoteId+"/photo-"+step.id+".jpg";
+      return supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
+        lot.uploadedPaths[step.id] = {stepId:step.id, title:step.title, path:path};
+        var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
+        return patchRemoteLot(lot, {photos:photoRefs});
+      });
+    }).catch(function(){ /* best-effort — anything missed here is caught at finalize */ });
+  }
+
+  function syncVideoLive(lot){
+    if(!supaReady()) return;
+    var v = lot.video;
+    if(!v || !v.file) return;
+    ensureRemoteLot(lot).then(function(){
+      var vpath = lot.remoteId+"/video."+safeExt(v.name, "mp4");
+      return supaUpload(vpath, v.file, v.file.type || "video/mp4").then(function(){
+        lot.videoUploaded = {name:v.name, size:v.size, path:vpath};
+        return patchRemoteLot(lot, {video:lot.videoUploaded});
+      });
+    }).catch(function(){});
+  }
+
+  function finalizeLot(lot, onProgress){
     var cat = CATEGORIES[lot.category];
     var uploads = [];
-    var photoRefs = [];
     var totalFiles = 0, doneFiles = 0;
 
-    cat.steps.forEach(function(s){ if(lot.photos[s.id]) totalFiles++; });
+    cat.steps.forEach(function(s){ if(lot.photos[s.id] && !lot.uploadedPaths[s.id]) totalFiles++; });
     lot.damage.forEach(function(d){ if(d.dataUrl) totalFiles++; });
-    if(lot.video && lot.video.file) totalFiles++;
+    if(lot.video && lot.video.file && !lot.videoUploaded) totalFiles++;
 
     function bump(){ doneFiles++; if(onProgress) onProgress(doneFiles, totalFiles); }
 
-    cat.steps.forEach(function(s){
-      var dataUrl = lot.photos[s.id];
-      if(dataUrl){
-        var path = lotId+"/photo-"+s.id+".jpg";
+    return ensureRemoteLot(lot).then(function(){
+      cat.steps.forEach(function(s){
+        var dataUrl = lot.photos[s.id];
+        if(dataUrl && !lot.uploadedPaths[s.id]){
+          var path = lot.remoteId+"/photo-"+s.id+".jpg";
+          uploads.push(
+            supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
+              lot.uploadedPaths[s.id] = {stepId:s.id, title:s.title, path:path};
+              bump();
+            })
+          );
+        }
+      });
+
+      var damageRefs = [];
+      lot.damage.forEach(function(d, i2){
+        if(d.dataUrl){
+          var path = lot.remoteId+"/damage-"+i2+".jpg";
+          uploads.push(
+            supaUpload(path, dataUrlToBlob(d.dataUrl), "image/jpeg").then(function(){
+              damageRefs.push({note:d.note, path:path});
+              bump();
+            })
+          );
+        }
+      });
+
+      var videoRef = lot.video && lot.video.na ? {na:true} : lot.videoUploaded;
+      if(lot.video && lot.video.file && !lot.videoUploaded){
+        var vpath = lot.remoteId+"/video."+safeExt(lot.video.name, "mp4");
         uploads.push(
-          supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
-            photoRefs.push({stepId:s.id, title:s.title, path:path});
+          supaUpload(vpath, lot.video.file, lot.video.file.type || "video/mp4").then(function(){
+            videoRef = {name:lot.video.name, size:lot.video.size, path:vpath};
             bump();
           })
         );
       }
-    });
 
-    var damageRefs = [];
-    lot.damage.forEach(function(d, i2){
-      if(d.dataUrl){
-        var path = lotId+"/damage-"+i2+".jpg";
-        uploads.push(
-          supaUpload(path, dataUrlToBlob(d.dataUrl), "image/jpeg").then(function(){
-            damageRefs.push({note:d.note, path:path});
-            bump();
-          })
-        );
-      }
-    });
-
-    var videoRef = lot.video && lot.video.na ? {na:true} : null;
-    if(lot.video && lot.video.file){
-      var vpath = lotId+"/video."+safeExt(lot.video.name, "mp4");
-      uploads.push(
-        supaUpload(vpath, lot.video.file, lot.video.file.type || "video/mp4").then(function(){
-          videoRef = {name:lot.video.name, size:lot.video.size, path:vpath};
-          bump();
-        })
-      );
-    }
-
-    return Promise.all(uploads).then(function(){
-      return supaInsertLot({
-        id: lotId,
-        category: lot.category,
-        info: lot.info,
-        condition: lot.cond,
-        attach: {list:lot.attach, other:lot.attachOther},
-        photos: photoRefs,
-        damage: damageRefs,
-        video: videoRef
+      return Promise.all(uploads).then(function(){
+        var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
+        return patchRemoteLot(lot, {
+          status: "new",
+          info: lot.info,
+          condition: lot.cond,
+          attach: {list:lot.attach, other:lot.attachOther},
+          photos: photoRefs,
+          damage: damageRefs,
+          video: videoRef
+        });
       });
     });
   }
@@ -587,7 +635,8 @@
       damage:[],
       cond:{starts:"", moves:"", hydraulics:"", lights:"", leaks:"", issues:"", records:"", notes:""},
       attach:[], attachOther:"",
-      ack:false
+      ack:false,
+      remoteId:null, remoteCreating:null, uploadedPaths:{}, videoUploaded:null
     };
   }
 
@@ -604,6 +653,9 @@
       if(pendingTarget.type === "step"){
         state.cur.photos[pendingTarget.id] = dataUrl;
         delete state.cur.naFlags[pendingTarget.id];
+        var cat = currentCategory();
+        var step = cat && cat.steps.filter(function(s){ return s.id===pendingTarget.id; })[0];
+        if(step) syncPhotoLive(state.cur, step, dataUrl);
       } else if(pendingTarget.type === "damage"){
         pendingTarget.item.dataUrl = dataUrl;
       }
@@ -640,7 +692,9 @@
     videoInput.value = "";
     if(!f) return;
     state.cur.video = {file:f, name:f.name || "video", size:f.size, url:URL.createObjectURL(f), na:false};
+    state.cur.videoUploaded = null;
     render();
+    syncVideoLive(state.cur);
   });
 
   function formatBytes(n){
@@ -790,9 +844,14 @@
       var c = CATEGORIES[key];
       var b = el('<button class="catbtn"><span class="name">'+esc(c.label)+'</span><span class="desc">'+esc(c.desc)+'</span></button>');
       on(b, "click", function(){
+        var changingCategory = state.cur.remoteId && state.cur.category !== key;
         state.cur.category = key;
         state.screen = "basicInfo";
         render();
+        if(supaReady()){
+          if(changingCategory) patchRemoteLot(state.cur, {category:key});
+          else ensureRemoteLot(state.cur);
+        }
       });
       grid.appendChild(b);
     });
@@ -1181,7 +1240,7 @@
         if(supaReady()){
           btn.disabled = true;
           btn.textContent = "Submitting...";
-          submitLotToSupabase(state.cur, function(done, total){
+          finalizeLot(state.cur, function(done, total){
             if(total) btn.textContent = "Submitting "+done+"/"+total+"...";
           }).then(function(){
             state.cur.uploaded = true;
