@@ -331,6 +331,21 @@
     }).catch(function(){ /* best-effort — anything missed here is caught at finalize */ });
   }
 
+  function syncExtraPhotoLive(lot, index){
+    if(!supaReady()) return;
+    var item = lot.extraPhotos[index];
+    if(!item) return;
+    var key = "extra-"+index;
+    ensureRemoteLot(lot).then(function(){
+      var path = lot.remoteId+"/"+key+".jpg";
+      return supaUpload(path, dataUrlToBlob(item.dataUrl), "image/jpeg").then(function(){
+        lot.uploadedPaths[key] = {stepId:key, title:"Uploaded photo "+(index+1), path:path};
+        var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
+        return patchRemoteLot(lot, {photos:photoRefs});
+      });
+    }).catch(function(){ /* best-effort — caught again at finalize */ });
+  }
+
   function syncVideoLive(lot){
     if(!supaReady()) return;
     var v = lot.video;
@@ -350,6 +365,7 @@
     var totalFiles = 0, doneFiles = 0;
 
     cat.steps.forEach(function(s){ if(lot.photos[s.id] && !lot.uploadedPaths[s.id]) totalFiles++; });
+    lot.extraPhotos.forEach(function(x, i2){ if(!lot.uploadedPaths["extra-"+i2]) totalFiles++; });
     lot.damage.forEach(function(d){ if(d.dataUrl) totalFiles++; });
     if(lot.video && lot.video.file && !lot.videoUploaded) totalFiles++;
 
@@ -363,6 +379,19 @@
           uploads.push(
             supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
               lot.uploadedPaths[s.id] = {stepId:s.id, title:s.title, path:path};
+              bump();
+            })
+          );
+        }
+      });
+
+      lot.extraPhotos.forEach(function(x, i2){
+        var key = "extra-"+i2;
+        if(!lot.uploadedPaths[key]){
+          var path = lot.remoteId+"/"+key+".jpg";
+          uploads.push(
+            supaUpload(path, dataUrlToBlob(x.dataUrl), "image/jpeg").then(function(){
+              lot.uploadedPaths[key] = {stepId:key, title:"Uploaded photo "+(i2+1), path:path};
               bump();
             })
           );
@@ -636,20 +665,24 @@
       cond:{starts:"", moves:"", hydraulics:"", lights:"", leaks:"", issues:"", records:"", notes:""},
       attach:[], attachOther:"",
       ack:false,
-      remoteId:null, remoteCreating:null, uploadedPaths:{}, videoUploaded:null
+      remoteId:null, remoteCreating:null, uploadedPaths:{}, videoUploaded:null,
+      extraPhotos:[]
     };
   }
 
   var pendingTarget = null;
-  var fileInput = document.createElement("input");
-  fileInput.type = "file"; fileInput.accept = "image/*"; fileInput.capture = "environment";
-  fileInput.style.display = "none";
-  document.body.appendChild(fileInput);
-  fileInput.addEventListener("change", function(e){
-    var f = e.target.files[0];
-    fileInput.value = "";
+  var bulkBusy = null;
+
+  function handlePickedPhoto(input){
+    var f = input.files[0];
+    input.value = "";
     if(!f || !pendingTarget) return;
     resizeImage(f, 1400, function(dataUrl){
+      if(!dataUrl){
+        pendingTarget = null;
+        alert("That photo could not be read. Try taking it with the camera instead, or pick a different one.");
+        return;
+      }
       if(pendingTarget.type === "step"){
         state.cur.photos[pendingTarget.id] = dataUrl;
         delete state.cur.naFlags[pendingTarget.id];
@@ -662,26 +695,92 @@
       pendingTarget = null;
       render();
     });
+  }
+
+  // Camera input: "capture" forces phones straight to the camera.
+  var fileInput = document.createElement("input");
+  fileInput.type = "file"; fileInput.accept = "image/*"; fileInput.capture = "environment";
+  fileInput.style.display = "none";
+  document.body.appendChild(fileInput);
+  fileInput.addEventListener("change", function(){ handlePickedPhoto(fileInput); });
+
+  // Gallery input: no "capture", so phones offer the photo library instead.
+  var galleryInput = document.createElement("input");
+  galleryInput.type = "file"; galleryInput.accept = "image/*";
+  galleryInput.style.display = "none";
+  document.body.appendChild(galleryInput);
+  galleryInput.addEventListener("change", function(){ handlePickedPhoto(galleryInput); });
+
+  // Bulk gallery input: multi-select for sellers who already shot everything.
+  var bulkInput = document.createElement("input");
+  bulkInput.type = "file"; bulkInput.accept = "image/*"; bulkInput.multiple = true;
+  bulkInput.style.display = "none";
+  document.body.appendChild(bulkInput);
+  bulkInput.addEventListener("change", function(){
+    var files = Array.prototype.slice.call(bulkInput.files);
+    bulkInput.value = "";
+    if(!files.length) return;
+    addBulkPhotos(files);
   });
 
+  // Processed one at a time so a 30-photo batch doesn't spike the phone's memory.
+  function addBulkPhotos(files){
+    bulkBusy = {done:0, total:files.length, failed:0};
+    render();
+    var chain = Promise.resolve();
+    files.forEach(function(f){
+      chain = chain.then(function(){
+        return new Promise(function(resolve){
+          resizeImage(f, 1400, function(dataUrl){
+            if(dataUrl){
+              var idx = state.cur.extraPhotos.length;
+              state.cur.extraPhotos.push({dataUrl:dataUrl, name:f.name || ("photo-"+(idx+1))});
+              syncExtraPhotoLive(state.cur, idx);
+            } else {
+              bulkBusy.failed++;
+            }
+            bulkBusy.done++;
+            render();
+            resolve();
+          });
+        });
+      });
+    });
+    chain.then(function(){
+      var failed = bulkBusy ? bulkBusy.failed : 0;
+      bulkBusy = null;
+      render();
+      if(failed) alert(failed+" photo(s) could not be read and were skipped. Everything else was added.");
+    });
+  }
+
+  // Calls cb(dataUrl) on success, or cb(null) if the image can't be read
+  // (e.g. an unsupported format) so callers never hang waiting on it.
   function resizeImage(file, maxDim, cb){
+    var done = false;
+    function finish(result){ if(!done){ done = true; cb(result); } }
     var img = new Image();
     var reader = new FileReader();
+    reader.onerror = function(){ finish(null); };
     reader.onload = function(ev){
+      img.onerror = function(){ finish(null); };
       img.onload = function(){
-        var w = img.width, h = img.height, scale = Math.min(1, maxDim / Math.max(w,h));
-        var cw = Math.round(w*scale), ch = Math.round(h*scale);
-        var canvas = document.createElement("canvas");
-        canvas.width = cw; canvas.height = ch;
-        canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
-        cb(canvas.toDataURL("image/jpeg", 0.82));
+        try{
+          var w = img.width, h = img.height, scale = Math.min(1, maxDim / Math.max(w,h));
+          var cw = Math.round(w*scale), ch = Math.round(h*scale);
+          var canvas = document.createElement("canvas");
+          canvas.width = cw; canvas.height = ch;
+          canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+          finish(canvas.toDataURL("image/jpeg", 0.82));
+        }catch(e){ finish(null); }
       };
       img.src = ev.target.result;
     };
-    reader.readAsDataURL(file);
+    try{ reader.readAsDataURL(file); }catch(e){ finish(null); }
   }
 
   function openCamera(target){ pendingTarget = target; fileInput.click(); }
+  function openGallery(target){ pendingTarget = target; galleryInput.click(); }
 
   var videoInput = document.createElement("input");
   videoInput.type = "file"; videoInput.accept = "video/*"; videoInput.capture = "environment";
@@ -827,6 +926,7 @@
         '<h3>Before you start</h3>'+
         '<ol>'+
           '<li><b>One item at a time.</b> You\'ll pick a machine type, then work through a fixed shot list.</li>'+
+          '<li><b>Already have photos on your phone?</b> You can pick them straight out of your gallery instead of retaking them — there is a button for it on every photo screen.</li>'+
           '<li><b>Good light matters more than a good camera.</b> Shoot outdoors, midday if possible, avoid deep shadows.</li>'+
           '<li><b>Say what you know — and what you don\'t.</b> The condition section keeps facts, what you observed, and your best guesses separate. That protects you and the buyer.</li>'+
           '<li><b>Our team reviews everything</b> before it goes live, same as always.</li>'+
@@ -918,7 +1018,7 @@
     } else if(isNA){
       frame.appendChild(el('<div class="na">Marked not applicable</div>'));
     } else {
-      frame.appendChild(el('<div class="placeholder">No photo yet — tap "Take Photo" below</div>'));
+      frame.appendChild(el('<div class="placeholder">No photo yet — take one below, or pick it from your gallery</div>'));
     }
     card.appendChild(frame);
 
@@ -928,6 +1028,9 @@
     var takeBtn = el('<button class="btn primary">'+(photo?"Retake Photo":"Take Photo")+'</button>');
     on(takeBtn, "click", function(){ openCamera({type:"step", id:step.id}); });
     btnrow.appendChild(takeBtn);
+    var galBtn = el('<button class="btn">Choose from Gallery</button>');
+    on(galBtn, "click", function(){ openGallery({type:"step", id:step.id}); });
+    btnrow.appendChild(galBtn);
     if(step.naAllowed && !photo){
       var naBtn = el('<button class="btn ghost">'+(isNA?"Undo — Not Applicable":"Not Applicable")+'</button>');
       on(naBtn, "click", function(){
@@ -940,6 +1043,8 @@
     if(step.tip) card.appendChild(el('<div class="tip">'+esc(step.tip)+'</div>'));
     main.appendChild(card);
 
+    main.appendChild(bulkUploadCard());
+
     renderFooter(app,
       function(){
         if(state.photoIndex===0){ state.screen="basicInfo"; }
@@ -948,12 +1053,43 @@
       },
       state.photoIndex === cat.steps.length-1 ? "Next: Video" : "Next Photo",
       function(){
-        if(!photoStepDone(step)){ alert("Take a photo or mark this shot not applicable before continuing."); return; }
+        if(!photoStepDone(step) && !usingBulkUpload()){
+          alert("Take a photo, pick one from your gallery, or mark this shot not applicable before continuing.");
+          return;
+        }
         if(state.photoIndex === cat.steps.length-1){ state.screen="video"; }
         else { state.photoIndex++; }
         render();
       }
     );
+  }
+
+  function usingBulkUpload(){ return state.cur.extraPhotos.length > 0; }
+
+  function bulkUploadCard(){
+    var card = el('<div class="card"></div>');
+    var count = state.cur.extraPhotos.length;
+    card.appendChild(el('<span class="qlabel">Already took photos on your phone?</span>'));
+    card.appendChild(el('<div class="qhint">Pick them straight out of your gallery instead of retaking them — you can select as many as you want at once. Do this and you can skip the shot-by-shot list.</div>'));
+
+    if(bulkBusy){
+      card.appendChild(el('<div class="tip">Adding photos — '+bulkBusy.done+' of '+bulkBusy.total+' done. Keep this page open.</div>'));
+    }
+
+    var btn = el('<button class="btn '+(count?"":"primary")+' full" style="margin-top:10px;">'+(count?"Add More From Gallery":"Select Photos From Gallery")+'</button>');
+    if(bulkBusy) btn.disabled = true;
+    on(btn, "click", function(){ bulkInput.click(); });
+    card.appendChild(btn);
+
+    if(count){
+      card.appendChild(el('<p style="font-size:13px;margin:10px 0 0;"><b>'+count+' photo'+(count===1?"":"s")+'</b> added from your gallery.</p>'));
+      var grid = el('<div class="thumbgrid"></div>');
+      state.cur.extraPhotos.forEach(function(x, i2){
+        grid.appendChild(el('<div class="t"><img src="'+x.dataUrl+'"><span class="lbl">Uploaded '+(i2+1)+'</span></div>'));
+      });
+      card.appendChild(grid);
+    }
+    return card;
   }
 
   function renderVideo(main, app){
@@ -1085,6 +1221,9 @@
       var camBtn = el('<button class="btn ghost" style="margin-top:6px;padding:6px 10px;font-size:12px;">'+(d.dataUrl?"Retake":"Add Photo")+'</button>');
       on(camBtn, "click", function(){ openCamera({type:"damage", item:d}); });
       txt.appendChild(camBtn);
+      var damGalBtn = el('<button class="btn ghost" style="margin-top:6px;margin-left:6px;padding:6px 10px;font-size:12px;">From Gallery</button>');
+      on(damGalBtn, "click", function(){ openGallery({type:"damage", item:d}); });
+      txt.appendChild(damGalBtn);
       row.appendChild(txt);
       var rm = el('<button class="rm">Remove</button>');
       on(rm, "click", function(){ state.cur.damage.splice(i2,1); render(); });
@@ -1160,8 +1299,15 @@
       "Check every shot before saving. Missing required photos are flagged below.");
 
     var missing = missingPhotoCount();
+    var bulkCount = state.cur.extraPhotos.length;
     var card = el('<div class="card"></div>');
-    card.appendChild(el('<span class="qlabel">'+esc(cat.label)+' — '+(missing? '<span class="pill warn">'+missing+' missing</span>' : '<span class="pill good">All shots complete</span>')+'</span>'));
+    var shotStatus = missing
+      ? (bulkCount ? '<span class="pill good">'+bulkCount+' uploaded from gallery</span>' : '<span class="pill warn">'+missing+' missing</span>')
+      : '<span class="pill good">All shots complete</span>';
+    card.appendChild(el('<span class="qlabel">'+esc(cat.label)+' — '+shotStatus+'</span>'));
+    if(missing && bulkCount){
+      card.appendChild(el('<div class="qhint">You uploaded photos from your gallery, so the shot-by-shot list below is optional. Anything still marked missing just was not taken from that specific angle — our team will follow up if we need more.</div>'));
+    }
     var thumbs = el('<div class="thumbgrid"></div>');
     cat.steps.forEach(function(s){
       var photo = state.cur.photos[s.id];
@@ -1175,6 +1321,8 @@
     });
     card.appendChild(thumbs);
     main.appendChild(card);
+
+    main.appendChild(bulkUploadCard());
 
     var i = state.cur.info;
     var kv = el('<div class="card"></div>');
@@ -1231,7 +1379,8 @@
     ackCard.appendChild(ackLbl);
     main.appendChild(ackCard);
 
-    var canSave = missing===0 && basicInfoDone() && state.cur.ack && !!(v && (v.url || v.na));
+    var enoughPhotos = missing===0 || usingBulkUpload();
+    var canSave = enoughPhotos && basicInfoDone() && state.cur.ack && !!(v && (v.url || v.na));
     renderFooter(app,
       function(){ state.screen = hasAttachPhase() ? "attachments" : "condition"; render(); },
       "Save This Lot",
@@ -1395,6 +1544,7 @@
       out.push("Location: "+(lot.info.location||"—"));
       out.push("Seller: "+(lot.info.seller||"—"));
       out.push("Photos captured: "+Object.keys(lot.photos).length+"/"+cat.steps.length);
+      if(lot.extraPhotos && lot.extraPhotos.length) out.push("Photos uploaded from gallery: "+lot.extraPhotos.length);
       out.push("Video: "+(lot.video && lot.video.url ? lot.video.name+" ("+formatBytes(lot.video.size)+") — download and attach separately" : (lot.video && lot.video.na ? "not applicable" : "not recorded")));
       out.push("Starts: "+lot.cond.starts+" | Moves: "+lot.cond.moves+" | Hydraulics: "+lot.cond.hydraulics);
       out.push("Warning lights: "+lot.cond.lights+" | Leaks: "+lot.cond.leaks+" | Maintenance records: "+lot.cond.records);
@@ -1453,6 +1603,9 @@
       cat.steps.forEach(function(s){
         var photo = lot.photos[s.id];
         if(photo) parts.push('<figure><img src="'+photo+'"><figcaption>'+esc(s.title)+'</figcaption></figure>');
+      });
+      (lot.extraPhotos||[]).forEach(function(x, xi){
+        if(x.dataUrl) parts.push('<figure><img src="'+x.dataUrl+'"><figcaption>Uploaded photo '+(xi+1)+'</figcaption></figure>');
       });
       lot.damage.forEach(function(d, di){
         if(d.dataUrl) parts.push('<figure><img src="'+d.dataUrl+'"><figcaption>Issue: '+esc(d.note||"(no note)")+'</figcaption></figure>');
