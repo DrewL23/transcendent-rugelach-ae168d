@@ -102,6 +102,57 @@
     };
   }
 
+  function saveSession(session){
+    state.session = session;
+    try{ sessionStorage.setItem("bsa_admin_session", JSON.stringify(session)); }catch(e){}
+  }
+
+  function sessionExpired(){
+    state.session = null;
+    try{ sessionStorage.removeItem("bsa_admin_session"); }catch(e){}
+    if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+    state.screen = "login";
+    render();
+  }
+
+  // Supabase access tokens expire after about an hour. Trade the refresh
+  // token for a new one so a long session doesn't silently start failing.
+  function refreshSession(){
+    if(!state.session || !state.session.refresh_token) return Promise.reject(new Error("no refresh token"));
+    return fetch(SUPABASE_URL+"/auth/v1/token?grant_type=refresh_token", {
+      method:"POST",
+      headers:{"apikey":SUPABASE_ANON_KEY, "Content-Type":"application/json"},
+      body:JSON.stringify({refresh_token: state.session.refresh_token})
+    }).then(function(res){
+      if(!res.ok) throw new Error("refresh failed");
+      return res.json();
+    }).then(function(session){
+      saveSession(session);
+      return session;
+    });
+  }
+
+  // Every authenticated request goes through here: on a 401 it refreshes the
+  // token once and retries, and only bounces to the login screen if that fails.
+  function authFetch(url, opts){
+    opts = opts || {};
+    function attempt(){
+      var o = {};
+      if(opts.method) o.method = opts.method;
+      if(opts.body !== undefined) o.body = opts.body;
+      o.headers = Object.assign({}, opts.headers || {}, authHeaders());
+      return fetch(url, o);
+    }
+    return attempt().then(function(res){
+      if(res.status !== 401 && res.status !== 403) return res;
+      return refreshSession().then(attempt).catch(function(err){
+        sessionExpired();
+        alert("Your admin session expired. Please sign in again, then retry.");
+        throw err;
+      });
+    });
+  }
+
   function login(email, password){
     return fetch(SUPABASE_URL+"/auth/v1/token?grant_type=password", {
       method:"POST",
@@ -111,39 +162,36 @@
       if(!res.ok) throw new Error("Login failed — check email and password.");
       return res.json();
     }).then(function(session){
-      state.session = session;
-      try{ sessionStorage.setItem("bsa_admin_session", JSON.stringify(session)); }catch(e){}
+      saveSession(session);
     });
   }
 
   function loadLots(){
-    return fetch(SUPABASE_URL+"/rest/v1/lots?select=*&order=created_at.desc", {
-      headers: authHeaders()
-    }).then(function(res){
+    return authFetch(SUPABASE_URL+"/rest/v1/lots?select=*&order=created_at.desc").then(function(res){
       if(!res.ok) throw new Error("Could not load submissions.");
       return res.json();
     }).then(function(rows){ state.lots = rows; });
   }
 
   function updateStatus(lotId, status){
-    return fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lotId, {
+    return authFetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lotId, {
       method:"PATCH",
-      headers:Object.assign({"Content-Type":"application/json", "Prefer":"return=representation"}, authHeaders()),
+      headers:{"Content-Type":"application/json", "Prefer":"return=representation"},
       body:JSON.stringify({status:status})
     });
   }
 
   function fetchAsBlob(path){
-    return fetch(fileUrl(path), {headers:authHeaders()}).then(function(res){
+    return authFetch(fileUrl(path)).then(function(res){
       if(!res.ok) throw new Error("Could not fetch "+path);
       return res.blob();
     });
   }
 
   function listStorageFolder(prefix){
-    return fetch(SUPABASE_URL+"/storage/v1/object/list/"+BUCKET, {
+    return authFetch(SUPABASE_URL+"/storage/v1/object/list/"+BUCKET, {
       method:"POST",
-      headers:Object.assign({"Content-Type":"application/json"}, authHeaders()),
+      headers:{"Content-Type":"application/json"},
       body:JSON.stringify({prefix:prefix, limit:1000, sortBy:{column:"name", order:"asc"}})
     }).then(function(res){
       if(!res.ok) throw new Error("Could not list files for "+prefix);
@@ -320,8 +368,8 @@
   }
 
   function deleteStorageObject(path){
-    return fetch(SUPABASE_URL+"/storage/v1/object/"+BUCKET+"/"+path, {
-      method:"DELETE", headers: authHeaders()
+    return authFetch(SUPABASE_URL+"/storage/v1/object/"+BUCKET+"/"+path, {
+      method:"DELETE"
     }).catch(function(){});
   }
 
@@ -331,16 +379,16 @@
     (lot.damage||[]).forEach(function(d){ if(d.path) paths.push(d.path); });
     if(lot.video && lot.video.path) paths.push(lot.video.path);
     return Promise.all(paths.map(deleteStorageObject)).then(function(){
-      return fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lot.id, {
-        method:"DELETE", headers: authHeaders()
+      return authFetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lot.id, {
+        method:"DELETE"
       });
     });
   }
 
   function uploadFile(path, blobOrFile, contentType){
-    return fetch(SUPABASE_URL+"/storage/v1/object/"+BUCKET+"/"+path, {
+    return authFetch(SUPABASE_URL+"/storage/v1/object/"+BUCKET+"/"+path, {
       method:"POST",
-      headers:Object.assign({"Content-Type":contentType||"application/octet-stream"}, authHeaders()),
+      headers:{"Content-Type":contentType||"application/octet-stream"},
       body: blobOrFile
     }).then(function(res){
       if(!res.ok) throw new Error("Upload failed: "+path);
@@ -421,9 +469,9 @@
     btn.textContent = "Importing lot "+num+"/"+total+"...";
 
     return Promise.all(uploads).then(function(){
-      return fetch(SUPABASE_URL+"/rest/v1/lots", {
+      return authFetch(SUPABASE_URL+"/rest/v1/lots", {
         method:"POST",
-        headers:Object.assign({"Content-Type":"application/json","Prefer":"return=minimal"}, authHeaders()),
+        headers:{"Content-Type":"application/json","Prefer":"return=minimal"},
         body:JSON.stringify({
           id: lotId,
           category: pl.category,
@@ -668,7 +716,7 @@
     if(lot.status === "in_progress"){
       app.appendChild(el('<p class="fineprint" style="text-align:center;">Watching for new photos every few seconds while the seller is still cataloging...</p>'));
       pollTimer = setInterval(function(){
-        fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lot.id+"&select=*", {headers:authHeaders()})
+        authFetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+lot.id+"&select=*")
           .then(function(res){ return res.ok ? res.json() : null; })
           .then(function(rows){
             if(!rows || !rows[0]) return;
