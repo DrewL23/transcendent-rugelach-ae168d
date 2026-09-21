@@ -268,7 +268,7 @@
     btn.disabled = true; btn.textContent = "Building...";
 
     var items = (lot.photos||[]).map(function(p){ return {title:p.title||p.stepId, path:p.path}; })
-      .concat((lot.damage||[]).map(function(d, i2){ return {title:"Issue: "+(d.note||("issue-"+i2)), path:d.path}; }));
+      .concat((lot.damage||[]).filter(function(d){ return d.path; }).map(function(d, i2){ return {title:"Issue: "+(d.note||("issue-"+i2)), path:d.path}; }));
     var loaded = 0;
 
     var chain = items.reduce(function(prev, item){
@@ -329,7 +329,7 @@
 
   function downloadAllPhotosZip(lot, btn){
     var items = (lot.photos||[]).map(function(p){ return {name:p.title||p.stepId, path:p.path}; })
-      .concat((lot.damage||[]).map(function(d, i2){ return {name:"Issue - "+(d.note||("issue-"+i2)), path:d.path}; }));
+      .concat((lot.damage||[]).filter(function(d){ return d.path; }).map(function(d, i2){ return {name:"Issue - "+(d.note||("issue-"+i2)), path:d.path}; }));
     if(!items.length){ alert("No photos on this submission."); return; }
     if(typeof JSZip === "undefined"){ alert("Zip library didn't load — check your internet connection and try again."); return; }
 
@@ -690,15 +690,20 @@
       on(link, "click", function(){ downloadFile(p.path, (p.stepId||"photo")+".jpg"); });
       grid.appendChild(link);
     });
+    var noteOnlyIssues = [];
     (lot.damage||[]).forEach(function(d, i2){
+      if(!d.path){ if(d.note) noteOnlyIssues.push(d.note); return; }
       var link = el('<a href="javascript:void(0)"><span class="lbl">Issue: '+esc(d.note||"")+'</span></a>');
       var img = el('<img loading="lazy">');
-      fetchAsBlob(d.path).then(function(blob){ img.src = URL.createObjectURL(blob); });
+      fetchAsBlob(d.path).then(function(blob){ img.src = URL.createObjectURL(blob); }).catch(function(){});
       link.insertBefore(img, link.firstChild);
       on(link, "click", function(){ downloadFile(d.path, "damage-"+i2+".jpg"); });
       grid.appendChild(link);
     });
     photosCard.appendChild(grid);
+    if(noteOnlyIssues.length){
+      photosCard.appendChild(el('<p style="font-size:13px;margin-top:12px;"><b>Issues noted without a photo yet:</b> '+esc(noteOnlyIssues.join("; "))+'</p>'));
+    }
     app.appendChild(photosCard);
 
     var delBtn = el('<button class="btn" style="margin-top:6px;border-color:var(--warn);color:var(--warn);">Delete This Submission</button>');

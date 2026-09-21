@@ -346,6 +346,54 @@
     }).catch(function(){ /* best-effort — caught again at finalize */ });
   }
 
+  // Everything the seller types — basic details, condition answers, what's
+  // included, issue notes — pushed up as they go, so an abandoned session
+  // still leaves the typed info behind, not just the photos.
+  var detailsSyncTimer = null;
+
+  function detailsPayload(lot){
+    var damageRefs = Object.keys(lot.uploadedDamage).map(function(k){ return lot.uploadedDamage[k]; });
+    lot.damage.forEach(function(d){
+      if(d.note && !lot.uploadedDamage[d.id]) damageRefs.push({note:d.note, path:null});
+    });
+    return {
+      info: lot.info,
+      condition: lot.cond,
+      attach: {list:lot.attach, other:lot.attachOther},
+      damage: damageRefs
+    };
+  }
+
+  function syncDetailsNow(lot){
+    if(!supaReady()) return;
+    if(detailsSyncTimer){ clearTimeout(detailsSyncTimer); detailsSyncTimer = null; }
+    ensureRemoteLot(lot).then(function(){
+      return patchRemoteLot(lot, detailsPayload(lot));
+    }).catch(function(){ /* best-effort — caught again at finalize */ });
+  }
+
+  // Debounced so typing a serial number doesn't fire a request per keystroke.
+  function queueDetailsSync(){
+    if(!supaReady()) return;
+    var lot = state.cur;
+    if(detailsSyncTimer) clearTimeout(detailsSyncTimer);
+    detailsSyncTimer = setTimeout(function(){
+      detailsSyncTimer = null;
+      syncDetailsNow(lot);
+    }, 1200);
+  }
+
+  function syncDamageLive(lot, entry){
+    if(!supaReady() || !entry.dataUrl) return;
+    ensureRemoteLot(lot).then(function(){
+      var path = lot.remoteId+"/damage-"+entry.id+".jpg";
+      return supaUpload(path, dataUrlToBlob(entry.dataUrl), "image/jpeg").then(function(){
+        lot.uploadedDamage[entry.id] = {note:entry.note, path:path};
+        return patchRemoteLot(lot, detailsPayload(lot));
+      });
+    }).catch(function(){});
+  }
+
   function syncVideoLive(lot){
     if(!supaReady()) return;
     var v = lot.video;
@@ -366,7 +414,7 @@
 
     cat.steps.forEach(function(s){ if(lot.photos[s.id] && !lot.uploadedPaths[s.id]) totalFiles++; });
     lot.extraPhotos.forEach(function(x, i2){ if(!lot.uploadedPaths["extra-"+i2]) totalFiles++; });
-    lot.damage.forEach(function(d){ if(d.dataUrl) totalFiles++; });
+    lot.damage.forEach(function(d){ if(d.dataUrl && !lot.uploadedDamage[d.id]) totalFiles++; });
     if(lot.video && lot.video.file && !lot.videoUploaded) totalFiles++;
 
     function bump(){ doneFiles++; if(onProgress) onProgress(doneFiles, totalFiles); }
@@ -398,13 +446,12 @@
         }
       });
 
-      var damageRefs = [];
-      lot.damage.forEach(function(d, i2){
-        if(d.dataUrl){
-          var path = lot.remoteId+"/damage-"+i2+".jpg";
+      lot.damage.forEach(function(d){
+        if(d.dataUrl && !lot.uploadedDamage[d.id]){
+          var path = lot.remoteId+"/damage-"+d.id+".jpg";
           uploads.push(
             supaUpload(path, dataUrlToBlob(d.dataUrl), "image/jpeg").then(function(){
-              damageRefs.push({note:d.note, path:path});
+              lot.uploadedDamage[d.id] = {note:d.note, path:path};
               bump();
             })
           );
@@ -424,6 +471,7 @@
 
       return Promise.all(uploads).then(function(){
         var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
+        var damageRefs = Object.keys(lot.uploadedDamage).map(function(k){ return lot.uploadedDamage[k]; });
         return patchRemoteLot(lot, {
           status: "new",
           info: lot.info,
@@ -666,7 +714,7 @@
       attach:[], attachOther:"",
       ack:false,
       remoteId:null, remoteCreating:null, uploadedPaths:{}, videoUploaded:null,
-      extraPhotos:[]
+      extraPhotos:[], uploadedDamage:{}
     };
   }
 
@@ -691,6 +739,7 @@
         if(step) syncPhotoLive(state.cur, step, dataUrl);
       } else if(pendingTarget.type === "damage"){
         pendingTarget.item.dataUrl = dataUrl;
+        syncDamageLive(state.cur, pendingTarget.item);
       }
       pendingTarget = null;
       render();
@@ -967,7 +1016,7 @@
     var inp = el('<input type="'+(opts.type||"text")+'">');
     inp.value = value || "";
     if(opts.placeholder) inp.placeholder = opts.placeholder;
-    on(inp, "input", function(e){ oninput(e.target.value); });
+    on(inp, "input", function(e){ oninput(e.target.value); queueDetailsSync(); });
     wrap.appendChild(inp);
     return wrap;
   }
@@ -995,6 +1044,7 @@
       "Next: Photos",
       function(){
         if(!basicInfoDone()){ alert("Make, model, and serial number are required before moving on."); return; }
+        syncDetailsNow(state.cur);
         state.photoIndex = 0; state.screen="photos"; render();
       }
     );
@@ -1166,7 +1216,7 @@
       var lbl = el('<label'+(state.cur.cond[key]===opt?' class="picked"':'')+'><input type="radio" name="'+key+'">'+esc(opt)+'</label>');
       var input = lbl.querySelector("input");
       input.checked = state.cur.cond[key]===opt;
-      on(input, "change", function(){ state.cur.cond[key]=opt; render(); });
+      on(input, "change", function(){ state.cur.cond[key]=opt; syncDetailsNow(state.cur); render(); });
       choices.appendChild(lbl);
     });
     row.appendChild(choices);
@@ -1216,7 +1266,11 @@
       var txt = el('<div class="txt"></div>');
       var ta = el('<textarea placeholder="Describe this issue" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:7px;font-family:inherit;font-size:13px;"></textarea>');
       ta.value = d.note || "";
-      on(ta, "input", function(e){ d.note = e.target.value; });
+      on(ta, "input", function(e){
+        d.note = e.target.value;
+        if(state.cur.uploadedDamage[d.id]) state.cur.uploadedDamage[d.id].note = d.note;
+        queueDetailsSync();
+      });
       txt.appendChild(ta);
       var camBtn = el('<button class="btn ghost" style="margin-top:6px;padding:6px 10px;font-size:12px;">'+(d.dataUrl?"Retake":"Add Photo")+'</button>');
       on(camBtn, "click", function(){ openCamera({type:"damage", item:d}); });
@@ -1226,20 +1280,25 @@
       txt.appendChild(damGalBtn);
       row.appendChild(txt);
       var rm = el('<button class="rm">Remove</button>');
-      on(rm, "click", function(){ state.cur.damage.splice(i2,1); render(); });
+      on(rm, "click", function(){
+        delete state.cur.uploadedDamage[d.id];
+        state.cur.damage.splice(i2,1);
+        syncDetailsNow(state.cur);
+        render();
+      });
       row.appendChild(rm);
       list.appendChild(row);
     });
     dcard.appendChild(list);
     var addBtn = el('<button class="btn ghost full" style="margin-top:10px;">+ Add an Issue</button>');
-    on(addBtn, "click", function(){ state.cur.damage.push({note:"", dataUrl:null}); render(); });
+    on(addBtn, "click", function(){ state.cur.damage.push({id:uuid(), note:"", dataUrl:null}); render(); });
     dcard.appendChild(addBtn);
     main.appendChild(dcard);
 
     renderFooter(app,
       function(){ state.screen="video"; render(); },
       hasAttachPhase() ? "Next: Attachments" : "Next: Review",
-      function(){ state.screen = hasAttachPhase() ? "attachments" : "review"; render(); }
+      function(){ syncDetailsNow(state.cur); state.screen = hasAttachPhase() ? "attachments" : "review"; render(); }
     );
   }
 
@@ -1250,7 +1309,7 @@
       var lbl = el('<label><input type="radio" name="'+key+'">'+esc(opt)+'</label>');
       var input = lbl.querySelector("input");
       input.checked = state.cur.cond[key]===opt;
-      on(input, "change", function(){ state.cur.cond[key]=opt; render(); });
+      on(input, "change", function(){ state.cur.cond[key]=opt; syncDetailsNow(state.cur); render(); });
       choices.appendChild(lbl);
     });
     row.appendChild(choices);
@@ -1261,7 +1320,7 @@
     wrap.appendChild(el('<label>'+esc(label)+(hint?' <span class="hint">— '+esc(hint)+'</span>':'')+'</label>'));
     var inp = isTextarea ? el('<textarea></textarea>') : el('<input type="text">');
     inp.value = value || "";
-    on(inp, "input", function(e){ oninput(e.target.value); });
+    on(inp, "input", function(e){ oninput(e.target.value); queueDetailsSync(); });
     wrap.appendChild(inp);
     return wrap;
   }
@@ -1280,6 +1339,7 @@
         var i2 = state.cur.attach.indexOf(opt);
         if(input.checked && i2===-1) state.cur.attach.push(opt);
         if(!input.checked && i2>-1) state.cur.attach.splice(i2,1);
+        syncDetailsNow(state.cur);
       });
       grid.appendChild(lbl);
     });
@@ -1289,7 +1349,7 @@
     renderFooter(app,
       function(){ state.screen="condition"; render(); },
       "Next: Review",
-      function(){ state.screen="review"; render(); }
+      function(){ syncDetailsNow(state.cur); state.screen="review"; render(); }
     );
   }
 
