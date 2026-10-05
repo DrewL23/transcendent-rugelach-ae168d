@@ -69,6 +69,10 @@
   .empty{color:var(--steel); font-size:14px; text-align:center; padding:40px 10px;}
   a.backlink{color:var(--steel); font-size:13px; text-decoration:none;}
   .statusselect{border:1px solid var(--line); border-radius:6px; padding:6px 10px; background:var(--surface); color:var(--ink); font-size:13px;}
+  .qhint{font-size:12.5px; color:var(--muted); margin-top:4px;}
+  .listingbox{width:100%; box-sizing:border-box; min-height:260px; margin-top:8px; padding:10px;
+    border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--ink);
+    font-family:Consolas,"Courier New",monospace; font-size:12.5px; line-height:1.5; resize:vertical;}
   @media (prefers-reduced-motion: no-preference){ .lotrow{transition:border-color .15s ease;} }
 </style>
 </head>
@@ -308,6 +312,10 @@
         (cond.notes? '<tr><td class="k">Notes</td><td>'+esc(cond.notes)+'</td></tr>':'')+
         (attach.list && attach.list.length? '<tr><td class="k">Included</td><td>'+esc(attach.list.concat(attach.other?[attach.other]:[]).join(", "))+'</td></tr>':'')+
         '</table>');
+      parts.push('<h2>Listing text</h2>'+
+        '<pre style="background:#f5f3ef;border:1px solid #ddd;border-radius:6px;padding:12px;'+
+        'font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;">'+
+        esc(info.listingText || fallbackListingText(lot))+'</pre>');
       parts.push('<div class="grid">');
       items.forEach(function(item){
         if(item.dataUrl) parts.push('<figure><img src="'+item.dataUrl+'"><figcaption>'+esc(item.title)+'</figcaption></figure>');
@@ -595,6 +603,38 @@
     }
   }
 
+  // Submissions made before the spec templates shipped have no stored
+  // listingText — rebuild the best block we can from what they did send.
+  function fallbackListingText(lot){
+    var i = lot.info || {}, c = lot.condition || {}, out = [];
+    function add(label, value){
+      var v = (value==null ? "" : String(value)).trim();
+      if(v && v !== "Unknown" && v !== "Not sure") out.push("• "+label+": "+v);
+    }
+    add("Year", i.year); add("Make", i.make); add("Model", i.model);
+    add("Serial #", i.serial); add("Meter Reads", i.meter); add("Cut Capacity", i.cutCapacity);
+    var specs = i.specs || {};
+    for(var k in specs){
+      if(specs.hasOwnProperty(k)) add(k, specs[k]);
+    }
+    var at = lot.attach || {};
+    var inc = (at.list || []).slice();
+    if(at.other) inc.push(at.other);
+    if(inc.length) add("Included", inc.join(", "));
+
+    var txt = "-- Specifications & Features --\n" + out.join("\n") + "\n";
+    var st = [];
+    var story = i.story || {};
+    if(story.maintenance) st.push(story.maintenance);
+    if(story.owners) st.push(story.owners);
+    if(story.updates) st.push(story.updates);
+    if(c.issues) st.push(c.issues);
+    if(story.other) st.push(story.other);
+    if(c.notes) st.push(c.notes);
+    if(st.length) txt += "\n-- Seller Statement --\n" + st.join(" ") + "\n";
+    return txt;
+  }
+
   function renderDetail(app){
     var lot = state.current;
     var info = lot.info || {}, cond = lot.condition || {}, attach = lot.attach || {};
@@ -608,6 +648,38 @@
     var htmlBtn = el('<button class="btn primary full" style="margin-bottom:14px;">Download as HTML</button>');
     on(htmlBtn, "click", function(){ downloadLotAsHtml(lot, htmlBtn); });
     app.appendChild(htmlBtn);
+
+    // Paste-ready listing block. The seller app builds this as they type and
+    // stores it on info.listingText; older submissions predate that, so fall
+    // back to assembling what we can from the raw fields.
+    var listCard = el('<div class="card"></div>');
+    listCard.appendChild(el('<span class="qlabel">Listing text — paste into the auction form</span>'));
+    if(info.equipTypeLabel){
+      listCard.appendChild(el('<div class="qhint">Seller identified this as: '+esc(info.equipTypeLabel)+'</div>'));
+    }
+    var listingBody = info.listingText || fallbackListingText(lot);
+    var ta = el('<textarea class="listingbox" spellcheck="false"></textarea>');
+    ta.value = listingBody;
+    listCard.appendChild(ta);
+    var copyBtn = el('<button class="btn primary full" style="margin-top:8px;">Copy listing text</button>');
+    on(copyBtn, "click", function(){
+      ta.focus();
+      ta.select();
+      function done(){
+        copyBtn.textContent = "Copied";
+        setTimeout(function(){ copyBtn.textContent = "Copy listing text"; }, 1600);
+      }
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(ta.value).then(done, function(){
+          try{ document.execCommand("copy"); done(); }catch(e){ alert("Press Ctrl+C to copy."); }
+        });
+      } else {
+        try{ document.execCommand("copy"); done(); }catch(e){ alert("Press Ctrl+C to copy."); }
+      }
+    });
+    listCard.appendChild(copyBtn);
+    listCard.appendChild(el('<div class="qhint" style="margin-top:8px;">The seller statement is a draft built from their answers — read it before it goes live.</div>'));
+    app.appendChild(listCard);
 
     var statusCard = el('<div class="card"></div>');
     statusCard.appendChild(el('<span class="qlabel">Status</span>'));
@@ -653,6 +725,36 @@
     if(cond.issues) condCard.appendChild(el('<p style="margin-top:10px;font-size:13.5px;"><b>Known issues:</b> '+esc(cond.issues)+'</p>'));
     if(cond.notes) condCard.appendChild(el('<p style="margin-top:6px;font-size:13.5px;"><b>Notes:</b> '+esc(cond.notes)+'</p>'));
     app.appendChild(condCard);
+
+    var specs = info.specs || {};
+    var specKeys = [];
+    for(var sk in specs){
+      if(specs.hasOwnProperty(sk) && String(specs[sk]||"").trim()) specKeys.push(sk);
+    }
+    if(specKeys.length){
+      var specCard = el('<div class="card"></div>');
+      specCard.appendChild(el('<span class="qlabel">Machine details'+(info.equipTypeLabel?' — '+esc(info.equipTypeLabel):'')+'</span>'));
+      var specHtml = '<dl class="kv">';
+      specKeys.forEach(function(k){ specHtml += '<dt>'+esc(k)+'</dt><dd>'+esc(specs[k])+'</dd>'; });
+      specCard.appendChild(el(specHtml + '</dl>'));
+      app.appendChild(specCard);
+    }
+
+    var story = info.story || {};
+    var storyRows = [
+      ["Owners", story.owners],
+      ["Maintenance", story.maintenance],
+      ["Recent repairs / updates", story.updates],
+      ["Anything else", story.other]
+    ].filter(function(r){ return String(r[1]||"").trim(); });
+    if(storyRows.length){
+      var storyCard = el('<div class="card"></div>');
+      storyCard.appendChild(el('<span class="qlabel">What the seller told us</span>'));
+      storyRows.forEach(function(r){
+        storyCard.appendChild(el('<p style="margin:8px 0 0;font-size:13.5px;"><b>'+esc(r[0])+':</b> '+esc(r[1])+'</p>'));
+      });
+      app.appendChild(storyCard);
+    }
 
     if(attach.list && attach.list.length){
       var attachCard = el('<div class="card"></div>');

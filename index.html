@@ -351,13 +351,28 @@
   // still leaves the typed info behind, not just the photos.
   var detailsSyncTimer = null;
 
+  // equipType/specs/story ride inside the existing `info` jsonb column, so
+  // none of this needed a schema change. Both the live sync and the final
+  // submit go through here — if they diverge, submitting wipes the specs.
+  function infoPayload(lot){
+    var info = {};
+    for(var k in lot.info){ if(lot.info.hasOwnProperty(k)) info[k] = lot.info[k]; }
+    var et = equipTypeFor(lot.equipType);
+    info.equipType = lot.equipType || "";
+    info.equipTypeLabel = et ? et.label : "";
+    info.specs = lot.specs || {};
+    info.story = lot.story || {};
+    info.listingText = listingText(lot);
+    return info;
+  }
+
   function detailsPayload(lot){
     var damageRefs = Object.keys(lot.uploadedDamage).map(function(k){ return lot.uploadedDamage[k]; });
     lot.damage.forEach(function(d){
       if(d.note && !lot.uploadedDamage[d.id]) damageRefs.push({note:d.note, path:null});
     });
     return {
-      info: lot.info,
+      info: infoPayload(lot),
       condition: lot.cond,
       attach: {list:lot.attach, other:lot.attachOther},
       damage: damageRefs
@@ -474,7 +489,7 @@
         var damageRefs = Object.keys(lot.uploadedDamage).map(function(k){ return lot.uploadedDamage[k]; });
         return patchRemoteLot(lot, {
           status: "new",
-          info: lot.info,
+          info: infoPayload(lot),
           condition: lot.cond,
           attach: {list:lot.attach, other:lot.attachOther},
           photos: photoRefs,
@@ -703,10 +718,682 @@
     cur:freshLot()
   };
 
+  // -------------------------------------------------------------------------
+  // Equipment spec templates.
+  //
+  // These mirror the "-- Specifications & Features --" block our catalogers
+  // hand-type into every listing. Year / Make / Model / Serial / Meter are
+  // already collected on the Basic details screen, so a template only covers
+  // what is left over for that machine type.
+  //
+  // Nothing in here is ever required. The point is to capture whatever the
+  // seller happens to know so nobody has to phone them for it later.
+  // -------------------------------------------------------------------------
+  function specT(id, label, ph){ return {id:id, label:label, ph:ph||""}; }
+  function specYN(id, label){ return {id:id, label:label, type:"yn"}; }
+  function specSel(id, label, opts){ return {id:id, label:label, type:"sel", opts:opts}; }
+
+  // Templates below are derived from 13,703 lots across our IronRing, yard
+  // and liquidation auctions. Field order follows how often our catalogers
+  // actually fill each one in, so the questions a seller sees first are the
+  // ones that matter most. Labels match our listing wording exactly.
+  var EQUIP_TYPES = [
+
+    // ---- tracked --------------------------------------------------------
+    {key:"skid-steer", label:"Skid Steer / Track Loader", cats:["tracked","wheeled"], meterLabel:"Hours", fields:
+      [specSel("controls","Controls",["Joystick","Hand/Foot","Hand","Foot"]),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specSel("rops","ROPS",["Enclosed","Open"]),
+       specT("engine","Engine","Kubota V3307"),
+       specSel("quickAttach","Quick Attach",["Hydraulic","Manual"]),
+       specYN("twoSpeed","2 Speed"),
+       specYN("highflow","Highflow"),
+       specYN("ac","AC"), specYN("heat","Heat"),
+       specT("attachment","Attachment","78” bucket"),
+       specT("liftCap","Lifting Capacity","2,624 lbs"),
+       specT("hp","Horsepower","74")]},
+
+    {key:"excavator", label:"Excavator (full size or mini)", cats:["tracked"], fields:
+      [specT("engine","Engine","John Deere 4045"),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("bucket","Bucket","48”"),
+       specYN("thumb","Hydraulic Thumb"),
+       specT("opWeight","Operating Weight","34,000 lbs"),
+       specYN("ac","AC"), specYN("heat","Heat"),
+       specT("digDepth","Digging Depth","11.2'"),
+       specT("maxReach","Max Reach","37.6'"),
+       specT("bucketCap","Bucket Capacity","0.03 yd³"),
+       specT("trackWidth","Track Width","7”")]},
+
+    {key:"dozer", label:"Dozer / Crawler", cats:["tracked"], fields:
+      [specT("engine","Engine","Cummins"),
+       specSel("rops","ROPS",["Enclosed","Canopy","Open"]),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("blade","Blade","101” 6-way"),
+       specYN("heat","Heat"), specYN("ac","AC"),
+       specT("hp","Horsepower","130"),
+       specT("attachment","Attachment","Winch"),
+       specT("trackWidth","Width to Outside of Tracks","88”"),
+       specT("lengthBucket","Length with Bucket on Ground","20'"),
+       specT("cabHeight","Height to Top of Cab","10'"),
+       specT("groundClear","Ground Clearance","15”")]},
+
+    {key:"feller-buncher", label:"Feller Buncher / Harvester", cats:["tracked"], fields:
+      [specSel("rops","ROPS",["Enclosed","Open"]),
+       specT("engine","Engine","Cummins QSB 6.7"),
+       specYN("heat","Heat"), specYN("ac","AC"),
+       specT("cutCap","Cut Capacity","20”"),
+       specT("engineModel","Engine Model",""),
+       specT("headMake","Cutter Head Make","Quadco"),
+       specT("headModel","Cutter Head Model","FD22B"),
+       specT("headType","Type of Head","Disc Cutter"),
+       specSel("tilt","Tilt",["Full","Partial","None"]),
+       specT("tireSize","Tire Size",""),
+       specT("bunk","Bunk","")]},
+
+    // ---- wheeled --------------------------------------------------------
+    {key:"forklift", label:"Forklift", cats:["wheeled"], fields:
+      [specT("loadCap","Load Capacity","5,000 lbs"),
+       specT("mastStage","Stage Mast","3"),
+       specYN("sideShift","Side Shift"),
+       specSel("rops","ROPS",["Open","Enclosed"]),
+       specT("reachHeight","Reach Height","218”"),
+       specYN("forkPositioner","Fork Positioner"),
+       specSel("tires","Tires",["Pneumatic","Solid Cushion","Cushion","Foam Filled"]),
+       specT("mastHeight","Mast Height","124”"),
+       specSel("fuel","Fuel",["Diesel","LP","Gas","Electric"]),
+       specT("engine","Engine","Toyota 4Y"),
+       specT("tireSize","Tire Size","7.00-12"),
+       specT("forkSize","Fork Size","4”x48”")]},
+
+    {key:"wheel-loader", label:"Wheel Loader / Payloader", cats:["wheeled"], fields:
+      [specSel("rops","ROPS",["Enclosed Cab","Open"]),
+       specT("engine","Engine","John Deere PowerTech 4045T"),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("tireSize","Tire Size","17.5 R25"),
+       specT("attachment","Attachment","Forks and slide-on bucket"),
+       specYN("thirdValve","3rd Valve"),
+       specSel("quickAttach","Quick Attach",["Hydraulic","Manual"]),
+       specYN("ac","AC"), specYN("heat","Heat"),
+       specT("pinCenters","Center to Center of Pins","39-1/2”"),
+       specT("liftCap","Lift Capacity","12,650 lb")]},
+
+    {key:"skidder", label:"Skidder", cats:["wheeled"], fields:
+      [specSel("rops","ROPS",["Enclosed","Open"]),
+       specYN("cableWinch","Cable Winch"),
+       specYN("grapple","Grapple"),
+       specYN("tireChains","Tire Chains"),
+       specT("tireSize","Tire Size","28L-26"),
+       specT("engine","Engine","John Deere 6068"),
+       specT("bladeSize","Blade Size","86”"),
+       specT("transmission","Transmission","6 speed"),
+       specSel("controls","Controls",["Joystick","Lever"]),
+       specYN("heat","Heat"), specYN("ac","AC"),
+       specT("engineNumber","Engine Number","6068")]},
+
+    {key:"scissor-lift", label:"Scissor Lift", cats:["wheeled"], fields:
+      [specT("weightCap","Weight Capacity","2,250 lbs"),
+       specT("liftHeight","Lifting Height","33'"),
+       specT("platformSize","Platform Size","88” wide 15' long"),
+       specT("tireSize","Tire Size","31 x 15.50-15 NHS"),
+       specT("engine","Engine","Electric"),
+       specT("machineWeight","Machine Weight",""),
+       specT("voltage","Voltage","24 V")]},
+
+    {key:"boom-lift", label:"Boom Lift / Man Lift", cats:["wheeled"], fields:
+      [specSel("powerSource","Power Source",["Diesel","Gas","Electric","Dual Fuel"]),
+       specSel("boomType","Type of Boom Lift",["Articulating","Telescopic"]),
+       specT("vertReach","Vertical Reach","63'"),
+       specT("loadCap","Load Capacity","500 lbs"),
+       specYN("rotatingPlatform","Rotating Platform Feature"),
+       specYN("powerToPlatform","Power to Platform"),
+       specT("horizReach","Horizontal Reach","40'"),
+       specYN("jib","Jib Feature"),
+       specT("basketSize","Basket Size","30”x48”"),
+       specT("engine","Engine","Deutz"),
+       specSel("driveLine","Drive Line",["4WD","AWD","2WD"]),
+       specT("dimensions","Overall Dimensions","")]},
+
+    {key:"telehandler", label:"Telehandler / Rough Terrain Forklift", cats:["wheeled"], fields:
+      [specSel("rops","ROPS",["Enclosed","Open"]),
+       specT("engine","Engine","Perkins 4 cylinder"),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("liftCap","Lift Capacity","11,000 lbs"),
+       specT("forkSize","Fork Size","6”x46”"),
+       specT("maxReach","Max Reach","55' height, 42' forward"),
+       specYN("heat","Heat"), specYN("ac","AC")]},
+
+    {key:"backhoe", label:"Backhoe", cats:["wheeled"], fields:
+      [specSel("rops","ROPS",["Enclosed","Open"]),
+       specT("engine","Engine","John Deere 4045"),
+       specT("transmission","Transmission","Powershift"),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specYN("heat","Heat"), specYN("ac","AC"),
+       specSel("drive","Drive",["2WD","4WD"]),
+       specSel("controls","Controls",["Standard","Excavator style"]),
+       specYN("auxHyd","Auxiliary Hydraulics"),
+       specT("loaderAttach","Loader Attachment","76” bucket"),
+       specT("hoeAttach","Hoe (Rear) Attachments","24” bucket"),
+       specYN("extendahoe","Extendahoe"),
+       specT("hp","Horsepower","99")]},
+
+    {key:"knuckleboom", label:"Knuckleboom / Log Loader", cats:["wheeled","trucks"], fields:
+      [specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("engine","Engine","John Deere 6068"),
+       specT("contGrapple","Continuous Grapple","Yes — RotoBec"),
+       specYN("bucksaw","Bucksaw Hookups"),
+       specT("trailer","Trailer","2013 Pitts KB48DHL"),
+       specT("delimber","Delimber","CSI 264Ultra"),
+       specYN("ac","AC"), specYN("heat","Heat"),
+       specT("boomLength","Boom Length","30'")]},
+
+    {key:"compactor", label:"Compactor / Roller / Grader", cats:["wheeled","tracked"], fields:
+      [specT("engine","Engine","Deutz"),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("drumWidth","Drum Width","66”"),
+       specT("opWeight","Operating Weight","12,000 lbs"),
+       specYN("vibratory","Vibratory"),
+       specSel("rops","ROPS",["Enclosed","Canopy","Open"]),
+       specYN("heat","Heat"), specYN("ac","AC")]},
+
+    {key:"trencher", label:"Trencher", cats:["wheeled","tracked"], fields:
+      [specT("engine","Engine","Kubota"),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("digDepth","Digging Depth","48”"),
+       specT("chainWidth","Chain / Boom Width","6”"),
+       specYN("backfillBlade","Backfill Blade"),
+       specT("attachment","Attachment","")]},
+
+    // ---- trucks & trailers (serial prints as VIN on these) ---------------
+    {key:"trailer", label:"Trailer (any type)", cats:["trucks"], titled:true, fields:
+      [specT("trailerType","Type of Trailer","Log bolster / dump / flatbed / enclosed"),
+       specSel("suspension","Suspension",["Spring","Air Ride","Walking Beam","Torsion"]),
+       specT("gvwr","GVWR","80,000"),
+       specT("tireSize","Tire Size","11R24.5"),
+       specT("length","Length","45'"),
+       specSel("brakes","Type of Brakes",["Air","Electric","Hydraulic Surge","None"]),
+       specT("floor","Floor","Live aluminum"),
+       specSel("hitch","Type of Hitch",["Semi","Gooseneck","Pintle","Ball","Fifth Wheel"]),
+       specT("width","Width","102”"),
+       specT("rampSize","Ramp Size","10'3” x 8'3”"),
+       specT("axles","Axles","Tandem"),
+       specT("interiorHeight","Interior Height","110”"),
+       specT("bunks","Bunks (log trailers)","Double")]},
+
+    {key:"semi-tractor", label:"Semi Tractor (road)", cats:["trucks"], titled:true, fields:
+      [specT("engine","Engine","Cummins ISX 450ST"),
+       specT("transmission","Transmission","Eaton Fuller 10 sp"),
+       specT("gvwr","GVWR","52,350 lb"),
+       specYN("heat","Heat"), specYN("ac","AC"),
+       specT("frontAxle","Front Axle Rating","12,350 lb"),
+       specT("rearAxle","Rear Axle Rating","40,000 lb"),
+       specT("wetKit","Wet Kit","Yes"),
+       specT("tireSize","Tire Size","11R 22.5"),
+       specT("suspension","Suspension","Hendrickson Air Ride"),
+       specT("wheelBase","Wheel Base","210”"),
+       specYN("airRideCab","Air Ride Cab"),
+       specYN("pintle","Pintle Hitch")]},
+
+    {key:"pickup", label:"Pickup Truck", cats:["trucks"], titled:true, meterLabel:"Meter Reads", fields:
+      [specT("engine","Engine","Duramax"),
+       specT("transmission","Transmission","Allison"),
+       specSel("driveLine","Drive Line",["4WD","RWD","FWD","AWD"]),
+       specT("bedSize","Bed Size","8'"),
+       specT("trailerHitch","Trailer Hitch","Rear receiver hitch"),
+       specT("hp","Horsepower",""),
+       specYN("bedLiner","Bed Liner"),
+       specYN("storageBoxes","In-Bed Storage Boxes"),
+       specT("bedAccessories","Bed Accessories","Tonneau cover")]},
+
+    {key:"van-box", label:"Van / Box Truck", cats:["trucks"], titled:true, fields:
+      [specT("gvwr","GVWR","26,000 lb"),
+       specSel("suspension","Suspension",["Air Ride","Leaf Spring"]),
+       specT("length","Length","48 ft"),
+       specYN("airBrakes","Air Brakes"),
+       specT("floor","Floor","Wooden plank"),
+       specSel("doors","Doors",["Swing Doors","Roll Up"]),
+       specT("tireSize","Tire Size","295/75R22.5"),
+       specT("roof","Roof","Translucent panels"),
+       specT("height","Height","13'6”"),
+       specT("interiorHeight","Interior Height","110”"),
+       specT("liftGate","Lift End Gate","No"),
+       specSel("wheel","Wheel",["Dual","Piloted","Single"])]},
+
+    {key:"dump-truck", label:"Dump Truck", cats:["trucks"], titled:true, fields:
+      [specT("transmission","Transmission","Allison"),
+       specT("engine","Engine","6.7 Power Stroke"),
+       specT("suspension","Suspension","Spring"),
+       specT("gvwr","GVWR","60,000 lb"),
+       specT("frontTire","Front Tire Size","11R24.5"),
+       specT("rearTire","Rear Tire Size","11R24.5"),
+       specT("bodySize","Dump Body Size","14' x 7'"),
+       specYN("pintle","Pintle Hitch"),
+       specT("frontAxle","Front Axle Rating","20,000 lb"),
+       specT("rearAxle","Rear Axle Rating","40,000 lb"),
+       specT("wetKit","Wet Kit","Yes"),
+       specYN("airRideCab","Air Ride Cab")]},
+
+    {key:"log-truck", label:"Log Truck", cats:["trucks"], titled:true, fields:
+      [specT("engine","Engine","Cummins ISX"),
+       specT("transmission","Transmission","Eaton Fuller 10 sp"),
+       specT("logLoader","Log Loader","Prentice 120C"),
+       specT("gvwr","GVWR","68,000 lb"),
+       specT("frontAxle","Front Axle Rating","12,000 lb"),
+       specT("rearAxle","Rear Axle Rating","40,000 lb"),
+       specT("suspension","Suspension","Walking beam"),
+       specYN("heat","Heat"), specYN("ac","AC"),
+       specYN("fullLock","Full Lock in Rears"),
+       specYN("doubleFrame","Double Frame")]},
+
+    {key:"service-truck", label:"Service / Utility Truck", cats:["trucks"], titled:true, fields:
+      [specT("engine","Engine","Cummins"),
+       specT("transmission","Transmission","Automatic"),
+       specT("gvwr","GVWR","33,000 lb"),
+       specT("bodyType","Body Type","Utility body with crane"),
+       specT("crane","Crane / Boom","IMT 7500"),
+       specYN("airCompressor","Air Compressor"),
+       specYN("welder","Welder"),
+       specSel("driveLine","Drive Line",["4WD","RWD","AWD"])]},
+
+    // ---- ag -------------------------------------------------------------
+    {key:"farm-tractor", label:"Farm Tractor", cats:["ag"], fields:
+      [specYN("rearPto","Rear PTO"),
+       specYN("threePoint","3 Point Hitch"),
+       specT("engine","Engine","Kubota V3300-E"),
+       specSel("drive","Drive",["2WD","4WD","MFWD"]),
+       specT("transmission","Transmission","Hydrostatic"),
+       specSel("fuel","Fuel",["Diesel","Gas"]),
+       specT("hp","Horsepower","65"),
+       specSel("rops","ROPS",["Open","Enclosed","Canopy"]),
+       specYN("heat","Heat"), specYN("ac","AC"),
+       specT("loader","Loader","Koyker 510")]},
+
+    {key:"farm-implement", label:"Farm Implement / 3-Point Equipment", cats:["ag"], fields:
+      [specT("itemType","Item Type","Rotary cutter"),
+       specT("width","Working Width","6'"),
+       specSel("mount","Mount",["3 Point","Pull Type","Skid Steer","Mounted"]),
+       specYN("pto","PTO Driven"),
+       specT("hydraulics","Hydraulics Required","1 remote"),
+       specT("size","Size / Capacity","")]},
+
+    {key:"mower", label:"Mower / Turf Equipment", cats:["ag","small"], fields:
+      [specT("deckSize","Deck Size","60”"),
+       specT("engine","Engine","Kawasaki FR691V"),
+       specSel("fuel","Fuel",["Gas","Diesel","Electric"]),
+       specSel("mowerType","Type",["Zero turn","Riding","Walk behind","Finish mower"]),
+       specSel("drive","Drive",["2WD","4WD"]),
+       specT("hp","Horsepower","23")]},
+
+    // ---- sawmill & processing -------------------------------------------
+    {key:"conveyor", label:"Conveyor / Transfer Deck / Rollcase", cats:["sawmill"], fields:
+      [specSel("driveType","Drive Type",["Electric","Hydraulic","None"]),
+       specT("length","Length","25'"),
+       specT("dimensions","Overall Dimensions","76” x 21'"),
+       specT("overallWidth","Overall Width","41”"),
+       specT("beltWidth","Belt Width","24”"),
+       specT("strands","# of Strands","3"),
+       specT("overallHeight","Overall Height",""),
+       specT("chainType","Chain Type","C55B rooftop"),
+       specT("rollerSize","Roller Size","6.5” x 18”"),
+       specT("panWidth","Pan Width","42”"),
+       specT("shaftSize","Shaft Size","1 7/16”"),
+       specT("rollSpacing","Roll Spacing","21 1/2”")]},
+
+    {key:"sawmill-bandmill", label:"Sawmill / Bandmill / Headrig", cats:["sawmill"], fields:
+      [specT("cutCap","Cut Capacity","32”"),
+       specT("setworks","Setworks","Accuset 2"),
+       specSel("driveType","Drive Type",["Line-Shaft","Electric","Hydraulic","None"]),
+       specT("strands","# of Strands","3"),
+       specT("logCap","Log Capacity","20'"),
+       specYN("hydraulic","Hydraulic"),
+       specT("poweredBy","Powered By","Kubota 65 hp"),
+       specYN("debarker","Debarker"),
+       specT("lubrication","Lubrication System","Water"),
+       specSel("controlSystem","Control System",["Stationary","Portable Pedestal"]),
+       specYN("laser","Laser Sight"),
+       specYN("wideHead","Extra Wide Head"),
+       specYN("bedExt","Bed Extensions"),
+       specT("wheelSize","Wheel Size","7/8” x 28”"),
+       specT("bladeSize","Blade Size","1.24”"),
+       specT("heads","Heads","1"),
+       specSel("guideType","Guide Type",["Roller","Block"]),
+       specSel("bladeTension","Blade Tension",["Manual","Air","Hydraulic"]),
+       specT("dimensions","Overall Dimensions","34' x 8' x 10' high")]},
+
+    {key:"dust-collection", label:"Dust Collection / Blower / Cyclone", cats:["sawmill"], fields:
+      [specSel("driveType","Drive Type",["Electric","Hydraulic","None"]),
+       specT("size","Size","28”"),
+       specT("inletSize","Inlet Size","10”"),
+       specT("outletSize","Outlet Size","9”"),
+       specYN("includesPipe","Includes Pipe"),
+       specT("hp","Horsepower","25")]},
+
+    {key:"chipper", label:"Chipper / Grinder", cats:["sawmill"], fields:
+      [specSel("driveType","Drive Type",["Diesel","Electric","Gas","PTO","None"]),
+       specSel("discharge","Discharge",["Top","Side","Rear"]),
+       specT("knives","# of Knives","4 knife drum"),
+       specT("size","Size","58”"),
+       specT("engine","Engine","Cat C15"),
+       specT("screenSize","Screen Size","6' x 6'"),
+       specT("panWidth","Pan Width",""),
+       specYN("logKickers","Log Kickers"),
+       specT("poweredBy","Powered By","150 HP electric motor"),
+       specSel("feed","Feed",["Horizontal","Top"])]},
+
+    {key:"cutoff-saw", label:"Trim / Chop / Cut-off Saw", cats:["sawmill"], fields:
+      [specT("outfeed","Outfeed","20” x 10'"),
+       specT("infeed","Infeed","20” x 10'"),
+       specT("bladeSize","Blade Size","18”"),
+       specT("cutCap","Cut Capacity","5” x 12”"),
+       specSel("bladeUpDown","Blade Up/Down",["Hydraulic","Air","Manual"]),
+       specSel("drive","Drive",["Electric","Hydraulic","Diesel"]),
+       specSel("bladeDrive","Blade Drive",["Direct","Lineshaft","Belt"]),
+       specT("capacity","Capacity",""),
+       specSel("bladeType","Blade Type",["Circle","Band"]),
+       specSel("feedRolls","Power Feed Rolls",["Both","Bottom Only","Top Only","None"]),
+       specSel("holdDown","Hold Down System",["Spring","Hydraulic","None"]),
+       specT("heads","Heads","1")]},
+
+    {key:"log-deck", label:"Log Turner / Deck Equipment", cats:["sawmill"], fields:
+      [specSel("driveType","Drive Type",["Electric","Hydraulic","None"]),
+       specT("size","Size","10' x 40'"),
+       specYN("stopLoad","Stop'n'Load"),
+       specSel("cylinder","Up & Down Cylinder",["Hydraulic","Air","None"]),
+       specT("strands","# of Strands","3"),
+       specT("chainType","Chain Type",""),
+       specSel("turnerType","Turner Type",["Chain","Bar"]),
+       specYN("includesControls","Includes Controls & Valve")]},
+
+    {key:"firewood-processor", label:"Firewood Processor / Splitter", cats:["sawmill","small"], fields:
+      [specT("engine","Engine","Kohler EFI"),
+       specSel("fuel","Fuel",["Diesel","Gas","Electric"]),
+       specT("logCap","Log Capacity","23”"),
+       specYN("portable","Portable"),
+       specT("powerSource","Power Source","Hydraulic"),
+       specT("wedge","Wedge","6-way"),
+       specT("liveDeckStrands","# Strands Hydraulic Live Deck","3"),
+       specYN("powerUpDown","Power Up & Down"),
+       specSel("sawType","Type of Saw",["Bar","Circular"]),
+       specT("outfeedConveyor","Outfeed Conveyor","24” x 30' folding belt")]},
+
+    {key:"edger", label:"Edger", cats:["sawmill"], fields:
+      [specSel("driveType","Drive Type",["Electric","Line-Shaft","Hydraulic","None"]),
+       specT("blades","# of Blades","4"),
+       specT("movableBlades","# of Moveable Blades","2"),
+       specT("stationaryBlades","# of Stationary Blades","2"),
+       specSel("bladeType","Blade Type",["Circle","Band"]),
+       specT("cutCap","Cut Capacity","3” x 36”"),
+       specT("infeed","Infeed Measurement","40” x 8'"),
+       specSel("setup","Edger Set Up",["Stationary","Portable"]),
+       specT("arborSize","Arbor Size","2 7/16”"),
+       specT("outfeed","Outfeed Measurement","40” x 8'"),
+       specYN("lasers","Lasers")]},
+
+    {key:"resaw", label:"Resaw", cats:["sawmill"], fields:
+      [specT("wheelSize","Wheel Size","36”"),
+       specSel("driveType","Drive Type",["Line-Shaft","Electric","None"]),
+       specT("strands","# of Strands","2"),
+       specSel("guideType","Guide Type",["Roller","Block"]),
+       specT("bladeSize","Blade Size","2” x 20'-1”"),
+       specT("heads","Heads","2"),
+       specYN("returnBelt","Return"),
+       specSel("bladeTension","Blade Tension",["Hydraulic","Air","Manual"]),
+       specT("cutCap","Cut Capacity","21” x 21”"),
+       specT("dimensions","Overall Dimensions",""),
+       specT("setworks","Setworks",""),
+       specSel("strain","Strain",["Weight","Hydraulic","Air"]),
+       specT("wheelThickness","Wheel Thickness","5/8”")]},
+
+    {key:"debarker", label:"Debarker", cats:["sawmill"], fields:
+      [specYN("cab","Cab"),
+       specSel("headDrive","Drive on Head",["Electric","Hydraulic"]),
+       specT("headType","Type of Head","Rosserhead"),
+       specT("headWidth","Width of Head","15 1/2”"),
+       specYN("cable","Cable"),
+       specT("debarkerHp","Debarker HP","40"),
+       specT("cabSize","Cab Size","4' x 5'"),
+       specYN("barnSweep","Barn Sweep"),
+       specSel("debarkerDrive","Debarker Drive",["Cable","Chain"]),
+       specT("controls","Controls",""),
+       specYN("pantograph","Pantograph")]},
+
+    {key:"log-carriage", label:"Log Carriage", cats:["sawmill"], fields:
+      [specT("setworks","Setworks","Yes"),
+       specT("setworksMake","Setworks Make","110/Hyd"),
+       specSel("carriageType","Carriage Type",["Automated","Air","Manual"]),
+       specT("axles","Axles","5"),
+       specT("headblocks","# of Headblocks","4"),
+       specT("carriageLength","Overall Carriage Length","16'"),
+       specYN("logTurners","Log/Cant Turners"),
+       specYN("scanner","Scanner"),
+       specYN("linearPositioning","Linear Positioning"),
+       specT("wheelSize","Wheel Size","13”"),
+       specT("trackWheelCenters","Center to Center of Track Wheels","54”"),
+       specYN("autoLube","Auto Lube System")]},
+
+    {key:"planer", label:"Planer / Moulder / Sander", cats:["sawmill"], fields:
+      [specT("workingWidth","Working Width","24”"),
+       specT("heads","# of Heads","4"),
+       specT("cutterheadWidth","Cutterhead Width","25”"),
+       specT("feedSpeed","Feed Speed","60 fpm"),
+       specSel("driveType","Drive Type",["Electric","Line-Shaft"]),
+       specT("voltage","Voltage","480"),
+       specSel("phase","Phase",["3 Phase","Single Phase"]),
+       specT("hp","Horsepower","25")]},
+
+    {key:"dry-kiln", label:"Dry Kiln / Boiler", cats:["sawmill"], fields:
+      [specT("chamberCapacity","Chamber Capacity","40 MBF"),
+       specT("btu","BTU Rating","2,000,000"),
+       specSel("fuel","Fuel",["Wood","Gas","Oil","Electric"]),
+       specT("fans","# of Fans","6"),
+       specT("dimensions","Overall Dimensions","40' x 20'"),
+       specT("controls","Controls","")]},
+
+    {key:"pallet-equipment", label:"Pallet / Cutstock Machinery", cats:["sawmill"], fields:
+      [specT("machineType","Type of Machine","Pallet nailer"),
+       specT("voltage","Voltage","480V 3 phase"),
+       specT("controlType","Control Type","PLC"),
+       specT("nailGuns","Number of Nail Guns","12"),
+       specT("palletSize","Pallet Capacity (L x W)","48” x 40”"),
+       specT("production","Production Capacity","1,800 pallets/day"),
+       specYN("autoStacker","Automatic Stacker"),
+       specT("stringers","Number of Stringers","3"),
+       specYN("holdDown","Pallet Hold Down")]},
+
+    {key:"blade-sharpener", label:"Blade Sharpener / Saw Service", cats:["sawmill","small"], fields:
+      [specSel("bladeKind","Blade Type Handled",["Band","Circle","Both"]),
+       specT("bladeSize","Blade Size Range","1” – 2”"),
+       specSel("driveType","Drive Type",["Electric","Manual"]),
+       specT("voltage","Voltage","110"),
+       specT("includes","Includes","Setter and grinder")]},
+
+    // ---- shop / support equipment ---------------------------------------
+    {key:"power-unit", label:"Hydraulic Power Unit / Electric Motor", cats:["small"], fields:
+      [specT("hp","Horsepower","250"),
+       specYN("clutch","Clutch"),
+       specSel("fuel","Fuel",["Diesel","Gas","Electric"]),
+       specT("engineCylinder","Engine Cylinder","6.0"),
+       specT("voltage","Voltage","480"),
+       specSel("phase","Phase",["3 Phase","Single Phase"]),
+       specT("rpm","RPM","1790"),
+       specT("frameSize","Frame Size","444T")]},
+
+    {key:"air-compressor", label:"Air Compressor", cats:["small"], fields:
+      [specT("cfm","Free Air Delivery (CFM)","185"),
+       specT("hp","Horsepower","25"),
+       specSel("powerSource","Power Source",["Electric","Diesel","Gas"]),
+       specT("tankSize","Tank Size","80 gal"),
+       specT("voltage","Voltage","480"),
+       specSel("phase","Phase",["3 Phase","Single Phase"])]},
+
+    {key:"generator", label:"Generator / Genset", cats:["small"], fields:
+      [specT("engineMake","Engine Make","John Deere"),
+       specT("engineModel","Engine Model","6081HF070"),
+       specT("engineNumber","Engine Number","RG6081H281115"),
+       specT("engineYear","Engine Year","2004"),
+       specT("capacityKw","Capacity (KW)","200"),
+       specSel("phase","Phase",["3 Phase","Single Phase"]),
+       specSel("fuel","Fuel",["Diesel","Natural Gas","Gas","Propane"]),
+       specT("genMake","Generator Make","Marathon"),
+       specT("genModel","Generator Model","432RSL4009"),
+       specT("genSn","Generator SN",""),
+       specT("voltage","Voltage","120/240"),
+       specT("hertz","Hertz","60"),
+       specT("amps","Amps","694"),
+       specT("dimensions","Overall Dimensions","")]},
+
+    {key:"welder", label:"Welder / Welding Equipment", cats:["small"], fields:
+      [specSel("process","Process Type",["Stick","MIG","TIG","Multi-process"]),
+       specT("amperage","Amperage","250 A"),
+       specT("dutyCycle","Duty Cycle","60% at 200 A"),
+       specT("inputVoltage","Input Voltage","240"),
+       specSel("phase","Phase",["Single Phase","3 Phase"]),
+       specT("engine","Engine (if engine driven)","Kohler 23 hp")]},
+
+    {key:"pressure-washer", label:"Pressure Washer", cats:["small"], fields:
+      [specT("psi","PSI","3,500"),
+       specT("gpm","GPM","4.0"),
+       specT("engine","Engine","Honda GX390"),
+       specT("pump","Pump","General"),
+       specYN("burner","Burner / Hot Water"),
+       specSel("fuel","Fuel",["Gas","Diesel","Electric"])]},
+
+    {key:"golf-cart", label:"Golf Cart / UTV / ATV", cats:["small","wheeled"], fields:
+      [specT("seats","Rated Member (seats)","4 people"),
+       specSel("powerType","Power",["Electric","Gas","Diesel"]),
+       specT("systemVoltage","System Voltage","60 V"),
+       specT("motorPower","Motor Power","4 KW AC motor"),
+       specT("engineModel","Engine Model","RATO"),
+       specT("topSpeed","Top Speed","24 mph"),
+       specT("range","Range","50 miles"),
+       specSel("drive","Drive",["2WD","4WD"]),
+       specT("dimensions","External Dimensions","")]},
+
+    // Attachments have never carried a spec block in our listings, so these
+    // fields are new — aimed at what buyers actually call and ask about.
+    {key:"attachment", label:"Attachment (bucket, forks, grapple, etc.)", cats:["small","tracked","wheeled","other"], fields:
+      [specT("attachType","Type of Attachment","Grapple bucket"),
+       specT("fits","Fits / Mount","Universal skid steer quick attach"),
+       specT("size","Size / Width","72”"),
+       specYN("hydraulic","Hydraulic"),
+       specSel("quickAttach","Quick Attach",["Hydraulic","Manual"]),
+       specT("cuttingEdge","Cutting Edge / Teeth","Bolt-on edge"),
+       specT("weight","Weight","")]},
+
+    {key:"shop-tool", label:"Shop Tool / Hand Tool", cats:["small","other"], fields:
+      [specT("toolType","Type of Tool","Drill press"),
+       specSel("powerType","Power",["Electric","Air","Gas","Manual"]),
+       specT("voltage","Voltage","110"),
+       specT("size","Size / Capacity",""),
+       specT("includes","Includes","")]},
+
+    {key:"other-equip", label:"Something else", cats:["tracked","wheeled","trucks","ag","sawmill","small","other"], fields:
+      [specT("itemType","What is it?","Describe the machine"),
+       specT("engine","Engine / Powered By",""),
+       specSel("fuel","Fuel",["Diesel","Gas","Propane","Electric","N/A"]),
+       specT("capacity","Capacity / Size",""),
+       specT("dimensions","Overall Dimensions","")]}
+  ];
+
+  function equipTypeFor(key){
+    for(var i=0;i<EQUIP_TYPES.length;i++){ if(EQUIP_TYPES[i].key===key) return EQUIP_TYPES[i]; }
+    return null;
+  }
+  function currentEquipType(){ return equipTypeFor(state.cur.equipType); }
+  function typesForCategory(catKey){
+    return EQUIP_TYPES.filter(function(t){ return t.cats.indexOf(catKey) > -1; });
+  }
+
+  // --- listing text + seller statement ------------------------------------
+  function stripPeriod(t){ return String(t==null?"":t).trim().replace(/[.\s]+$/, ""); }
+  function capFirst(t){ return t ? t.charAt(0).toUpperCase()+t.slice(1) : t; }
+  function asSentence(t){ t = stripPeriod(t); return t ? capFirst(t)+"." : ""; }
+  function listPhrase(a){
+    if(a.length===1) return a[0];
+    if(a.length===2) return a[0]+" and "+a[1];
+    return a.slice(0,-1).join(", ")+", and "+a[a.length-1];
+  }
+  function knownValue(v){
+    v = String(v==null?"":v).trim();
+    if(!v || v==="Not sure" || v==="Unknown") return "";
+    return v;
+  }
+
+  // Bulleted spec block, in the order and wording our listings already use.
+  function listingSpecLines(lot){
+    var i = lot.info || {}, specs = lot.specs || {}, out = [];
+    var t = equipTypeFor(lot.equipType);
+    function add(label, value){
+      var v = knownValue(value);
+      if(v) out.push(label+": "+v);
+    }
+    add("Year", i.year);
+    add("Make", i.make);
+    add("Model", i.model);
+    add(t && t.titled ? "VIN" : "Serial #", i.serial);
+    add(t && t.meterLabel ? t.meterLabel : "Meter Reads", i.meter);
+    if(t){ t.fields.forEach(function(f){ add(f.label, specs[f.id]); }); }
+    add("Cut Capacity", i.cutCapacity);
+    var inc = (lot.attach || []).slice();
+    if(lot.attachOther) inc.push(lot.attachOther);
+    if(inc.length) add("Included", inc.join(", "));
+    return out;
+  }
+
+  // A draft, written to be edited — not pasted blind.
+  function draftSellerStatement(lot){
+    var s = lot.story || {}, c = lot.cond || {}, parts = [];
+    if(s.maintenance) parts.push(asSentence(s.maintenance));
+    if(s.owners) parts.push(asSentence(s.owners));
+
+    var works = [];
+    if(c.starts==="Yes") works.push("starts");
+    if(c.moves==="Yes") works.push("moves under its own power");
+    if(c.hydraulics==="Yes") works.push("the hydraulics work");
+    if(works.length) parts.push(capFirst(listPhrase(works))+".");
+
+    if(s.updates) parts.push(asSentence(s.updates));
+
+    var flaws = [];
+    if(c.starts==="No") flaws.push("it did not start");
+    if(c.moves==="No") flaws.push("it did not move under its own power");
+    if(c.hydraulics==="No") flaws.push("the hydraulics do not work");
+    if(c.lights==="Yes") flaws.push("a warning light is on");
+    if(c.leaks==="Yes") flaws.push("it has a visible fluid leak");
+    if(c.issues) flaws.push(stripPeriod(c.issues));
+    if(flaws.length) parts.push(capFirst(listPhrase(flaws))+".");
+
+    var unsure = [];
+    if(c.starts==="Unknown") unsure.push("whether it starts");
+    if(c.moves==="Unknown") unsure.push("whether it moves");
+    if(c.hydraulics==="Unknown") unsure.push("the hydraulics");
+    if(c.lights==="Unknown") unsure.push("the warning lights");
+    if(c.leaks==="Unknown") unsure.push("any leaks");
+    if(unsure.length) parts.push("Seller is unsure of "+listPhrase(unsure)+".");
+
+    if(c.records==="Yes") parts.push("Maintenance records are available.");
+    if(s.other) parts.push(asSentence(s.other));
+    if(c.notes) parts.push(asSentence(c.notes));
+
+    return parts.join(" ");
+  }
+
+  function listingText(lot){
+    var lines = listingSpecLines(lot);
+    var txt = "-- Specifications & Features --\n";
+    for(var i=0;i<lines.length;i++){ txt += "• "+lines[i]+"\n"; }
+    var st = draftSellerStatement(lot);
+    if(st) txt += "\n-- Seller Statement --\n"+st+"\n";
+    return txt;
+  }
+
   function freshLot(){
     return {
       category:null,
+      equipType:null,
       info:{seller:"", make:"", model:"", year:"", serial:"", meter:"", location:"", cutCapacity:""},
+      specs:{},
+      story:{owners:"", maintenance:"", updates:"", other:""},
       photos:{}, naFlags:{},
       video:null,
       damage:[],
@@ -859,7 +1546,15 @@
   function on(node, evt, fn){ node.addEventListener(evt, fn); return node; }
   function esc(s){ return (s||"").replace(/[&<>"']/g, function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
 
-  var STAGE_ORDER = ["category","basicInfo","photos","video","condition","attachments","review"];
+  var STAGE_ORDER = ["category","basicInfo","photos","video","specs","condition","attachments","review"];
+
+  // Keeps every "Step N of M" label honest when stages are added or skipped.
+  function stepLabel(screen){
+    var stages = activeStages();
+    var i = stages.indexOf(screen || state.screen);
+    if(i < 0) return "";
+    return "Step "+(i+1)+" of "+stages.length;
+  }
 
   function currentCategory(){ return state.cur.category ? CATEGORIES[state.cur.category] : null; }
   function hasAttachPhase(){ var c = currentCategory(); return c && c.attachments; }
@@ -930,6 +1625,7 @@
     if(state.screen==="basicInfo") return renderBasicInfo(main, app);
     if(state.screen==="photos") return renderPhotos(main, app);
     if(state.screen==="video") return renderVideo(main, app);
+    if(state.screen==="specs") return renderSpecs(main, app);
     if(state.screen==="condition") return renderCondition(main, app);
     if(state.screen==="attachments") return renderAttachments(main, app);
     if(state.screen==="review") return renderReview(main, app);
@@ -986,7 +1682,7 @@
   }
 
   function renderCategory(main, app){
-    screenHeader(main, "Step 1 of "+activeStages().length, "What are you cataloging?",
+    screenHeader(main, stepLabel("category"), "What are you cataloging?",
       "Pick the closest match — this sets the exact photo list you'll follow.");
     var grid = el('<div class="catgrid"></div>');
     Object.keys(CATEGORIES).forEach(function(key){
@@ -994,6 +1690,13 @@
       var b = el('<button class="catbtn"><span class="name">'+esc(c.label)+'</span><span class="desc">'+esc(c.desc)+'</span></button>');
       on(b, "click", function(){
         var changingCategory = state.cur.remoteId && state.cur.category !== key;
+        // A machine type picked under the old category rarely fits the new
+        // one — drop it rather than show the wrong spec sheet.
+        if(state.cur.category && state.cur.category !== key){
+          state.cur.equipType = null;
+          state.cur.specs = {};
+          state.showAllTypes = false;
+        }
         state.cur.category = key;
         state.screen = "basicInfo";
         render();
@@ -1022,7 +1725,7 @@
   }
 
   function renderBasicInfo(main, app){
-    screenHeader(main, "Step 2 of "+activeStages().length, "Basic details",
+    screenHeader(main, stepLabel("basicInfo"), "Basic details",
       "Grab these off the machine itself where you can — the serial plate and title, not memory.");
     var card = el('<div class="card"></div>');
     var i = state.cur.info;
@@ -1053,7 +1756,7 @@
   function renderPhotos(main, app){
     var cat = currentCategory();
     var step = cat.steps[state.photoIndex];
-    screenHeader(main, "Step 3 of "+activeStages().length+" — Photo "+(state.photoIndex+1)+" of "+cat.steps.length, step.title, step.instr);
+    screenHeader(main, stepLabel("photos")+" — Photo "+(state.photoIndex+1)+" of "+cat.steps.length, step.title, step.instr);
 
     var card = el('<div class="card photostep"></div>');
     var meta = el('<div class="stepmeta"><span class="stepcount">SHOT '+(state.photoIndex+1)+' / '+cat.steps.length+'</span>'+
@@ -1143,7 +1846,7 @@
   }
 
   function renderVideo(main, app){
-    screenHeader(main, "Step 4 of "+activeStages().length, "Operating video",
+    screenHeader(main, stepLabel("video"), "Operating video",
       "This is the single most convincing thing in the whole listing — buyers who see it running bid with more confidence.");
 
     main.appendChild(el(
@@ -1199,11 +1902,127 @@
     var canProceed = hasVideo || isNA;
     renderFooter(app,
       function(){ state.photoIndex = currentCategory().steps.length-1; state.screen="photos"; render(); },
-      "Next: Condition",
+      "Next: Machine Details",
       function(){
         if(!canProceed){ alert("Record a video or mark it not applicable before continuing."); return; }
-        state.screen="condition"; render();
+        state.screen="specs"; render();
       }
+    );
+  }
+
+  // One spec field. Radio groups update their own highlight instead of
+  // re-rendering — a 15-field screen that jumps back to the top on every
+  // tap is unusable on a phone.
+  function specFieldNode(f){
+    var v = state.cur.specs[f.id] || "";
+    if(f.type==="yn" || f.type==="sel"){
+      var opts = (f.type==="yn" ? ["Yes","No"] : f.opts.slice()).concat(["Not sure"]);
+      var row = el('<div class="qrow"></div>');
+      row.appendChild(el('<span class="qlabel">'+esc(f.label)+'</span>'));
+      var choices = el('<div class="choices"></div>');
+      opts.forEach(function(opt){
+        var lbl = el('<label'+(v===opt?' class="picked"':'')+'><input type="radio" name="spec-'+f.id+'">'+esc(opt)+'</label>');
+        var input = lbl.querySelector("input");
+        input.checked = v===opt;
+        on(input, "change", function(){
+          state.cur.specs[f.id] = opt;
+          var sibs = choices.querySelectorAll("label");
+          for(var k=0;k<sibs.length;k++){ sibs[k].className = ""; }
+          lbl.className = "picked";
+          syncDetailsNow(state.cur);
+        });
+        choices.appendChild(lbl);
+      });
+      row.appendChild(choices);
+      return row;
+    }
+    return fieldRow(f.label, null, v, function(val){ state.cur.specs[f.id] = val; }, {placeholder:f.ph});
+  }
+
+  function renderSpecs(main, app){
+    var picked = currentEquipType();
+
+    screenHeader(main, stepLabel("specs"), "Machine details",
+      "Photos are the important part and you have already done them. " +
+      "This is the spec sheet that goes on your listing — <b>answer only what you know</b> " +
+      "and skip the rest. Nothing here is required.");
+
+    if(!picked){
+      var suggested = typesForCategory(state.cur.category);
+      var showingAll = !!state.showAllTypes || suggested.length === 0;
+      var list = showingAll ? EQUIP_TYPES : suggested;
+
+      var pc = el('<div class="card"></div>');
+      pc.appendChild(el('<span class="qlabel">What kind of machine is this?</span>'));
+      pc.appendChild(el('<div class="qhint">Pick the closest match. It only changes which questions we ask you next.</div>'));
+      var grid = el('<div class="catgrid" style="margin-top:10px;"></div>');
+      list.forEach(function(t){
+        var b = el('<button class="catbtn"><span class="name">'+esc(t.label)+'</span></button>');
+        on(b, "click", function(){
+          state.cur.equipType = t.key;
+          syncDetailsNow(state.cur);
+          render();
+        });
+        grid.appendChild(b);
+      });
+      pc.appendChild(grid);
+      if(!showingAll){
+        var moreBtn = el('<button class="btn ghost full" style="margin-top:10px;">Show all equipment types</button>');
+        on(moreBtn, "click", function(){ state.showAllTypes = true; render(); });
+        pc.appendChild(moreBtn);
+      }
+      main.appendChild(pc);
+
+      renderFooter(app,
+        function(){ state.screen="video"; render(); },
+        "Skip this step",
+        function(){ syncDetailsNow(state.cur); state.screen="condition"; render(); }
+      );
+      return;
+    }
+
+    var head = el('<div class="card"></div>');
+    head.appendChild(el('<span class="qlabel">'+esc(picked.label)+'</span>'));
+    var changeBtn = el('<button class="btn ghost" style="margin-top:8px;padding:6px 10px;font-size:12px;">Change machine type</button>');
+    on(changeBtn, "click", function(){
+      state.cur.equipType = null;
+      state.showAllTypes = false;
+      syncDetailsNow(state.cur);
+      render();
+    });
+    head.appendChild(changeBtn);
+    main.appendChild(head);
+
+    var card = el('<div class="card"></div>');
+    var textFields = picked.fields.filter(function(f){ return !f.type; });
+    var pickFields = picked.fields.filter(function(f){ return !!f.type; });
+    if(textFields.length){
+      var grid2 = el('<div class="grid2"></div>');
+      textFields.forEach(function(f){ grid2.appendChild(specFieldNode(f)); });
+      card.appendChild(grid2);
+    }
+    pickFields.forEach(function(f){ card.appendChild(specFieldNode(f)); });
+    main.appendChild(card);
+
+    var story = el('<div class="card"></div>');
+    story.appendChild(el('<span class="qlabel">What else do you know about this machine?</span>'));
+    story.appendChild(el('<div class="qhint">This is what we turn into the seller statement on your listing. ' +
+      'Plain English is perfect — write it the way you would say it on the phone. ' +
+      'You will have a spot for known problems on the next screen.</div>'));
+    story.appendChild(fieldRow2("How many owners has it had?", "and how long have you had it",
+      state.cur.story.owners, function(v){ state.cur.story.owners = v; }));
+    story.appendChild(fieldRow2("How has it been maintained?", "who serviced it, how often, what you kept up on",
+      state.cur.story.maintenance, function(v){ state.cur.story.maintenance = v; }, true));
+    story.appendChild(fieldRow2("Any recent repairs, updates, or new parts?", "new tires, rebuilt engine, new hoses",
+      state.cur.story.updates, function(v){ state.cur.story.updates = v; }, true));
+    story.appendChild(fieldRow2("Anything else a buyer should know?", "what it was used for, why you are selling",
+      state.cur.story.other, function(v){ state.cur.story.other = v; }, true));
+    main.appendChild(story);
+
+    renderFooter(app,
+      function(){ state.screen="video"; render(); },
+      "Next: Condition",
+      function(){ syncDetailsNow(state.cur); state.screen="condition"; render(); }
     );
   }
 
@@ -1224,7 +2043,7 @@
   }
 
   function renderCondition(main, app){
-    screenHeader(main, "Step 5 of "+activeStages().length, "Condition & disclosure",
+    screenHeader(main, stepLabel("condition"), "Condition & disclosure",
       "This is what protects both you and the buyer. Be specific — vague answers cause disputes after the sale.");
 
     main.appendChild(el(
@@ -1296,7 +2115,7 @@
     main.appendChild(dcard);
 
     renderFooter(app,
-      function(){ state.screen="video"; render(); },
+      function(){ state.screen="specs"; render(); },
       hasAttachPhase() ? "Next: Attachments" : "Next: Review",
       function(){ syncDetailsNow(state.cur); state.screen = hasAttachPhase() ? "attachments" : "review"; render(); }
     );
@@ -1327,7 +2146,7 @@
 
   function renderAttachments(main, app){
     var cat = currentCategory();
-    screenHeader(main, "Step 6 of "+activeStages().length, "What's included in the sale?",
+    screenHeader(main, stepLabel("attachments"), "What's included in the sale?",
       "Check everything that will transfer with this item — anything not checked is assumed excluded.");
     var card = el('<div class="card"></div>');
     var grid = el('<div class="checkgrid"></div>');
@@ -1355,7 +2174,7 @@
 
   function renderReview(main, app){
     var cat = currentCategory();
-    screenHeader(main, "Step "+activeStages().length+" of "+activeStages().length, "Review this lot",
+    screenHeader(main, stepLabel("review"), "Review this lot",
       "Check every shot before saving. Missing required photos are flagged below.");
 
     var missing = missingPhotoCount();
@@ -1398,6 +2217,25 @@
       '</dl>'
     ));
     main.appendChild(kv);
+
+    var et = currentEquipType();
+    if(et){
+      var sc = el('<div class="card"></div>');
+      sc.appendChild(el('<span class="qlabel">Machine details — '+esc(et.label)+'</span>'));
+      var specDl = '<dl class="kv" style="margin-top:8px;">';
+      var answered = 0;
+      et.fields.forEach(function(f){
+        var v = knownValue(state.cur.specs[f.id]);
+        if(v){ answered++; specDl += '<dt>'+esc(f.label)+'</dt><dd>'+esc(v)+'</dd>'; }
+      });
+      specDl += '</dl>';
+      if(answered) sc.appendChild(el(specDl));
+      else sc.appendChild(el('<div class="qhint">You skipped these — that is fine, we will fill them in.</div>'));
+      var tapSpecs = el('<button class="btn ghost" style="margin-top:8px;padding:6px 10px;font-size:12px;">Edit machine details</button>');
+      on(tapSpecs, "click", function(){ state.screen="specs"; render(); });
+      sc.appendChild(tapSpecs);
+      main.appendChild(sc);
+    }
 
     var c = state.cur.cond;
     var cc = el('<div class="card"></div>');
@@ -1659,6 +2497,9 @@
         (lot.cond.notes? '<tr><td class="k">Notes</td><td>'+esc(lot.cond.notes)+'</td></tr>':'')+
         (lot.attach && lot.attach.length? '<tr><td class="k">Included</td><td>'+esc(lot.attach.concat(lot.attachOther?[lot.attachOther]:[]).join(", "))+'</td></tr>':'')+
         '</table>');
+      parts.push('<h3 style="font-size:14px;margin:22px 0 4px;">Paste-ready listing text</h3>'+
+        '<pre style="background:#f5f3ef;border:1px solid #ddd;border-radius:6px;padding:12px;'+
+        'font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap;">'+esc(listingText(lot))+'</pre>');
       parts.push('<div class="grid">');
       cat.steps.forEach(function(s){
         var photo = lot.photos[s.id];
