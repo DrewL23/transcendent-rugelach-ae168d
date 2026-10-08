@@ -585,7 +585,7 @@
       var photoCount = (lot.photos||[]).length;
       var row = el(
         '<div class="lotrow">'+
-          '<div><div class="nm">'+esc(info.make)+' '+esc(info.model)+' <span style="color:var(--steel);font-weight:400;">— '+esc(lot.category)+'</span></div>'+
+          '<div><div class="nm">'+esc(lotDisplayName(lot))+' <span style="color:var(--steel);font-weight:400;">— '+esc(lot.category)+'</span></div>'+
           '<div class="meta">S/N '+esc(info.serial||"—")+' · '+photoCount+' photos'+(lot.video&&lot.video.path?" · video":"")+' · '+esc(new Date(lot.created_at).toLocaleString())+'</div></div>'+
           '<span class="pill '+esc(lot.status||"new")+'">'+esc(lot.status||"new")+'</span>'+
         '</div>'
@@ -605,14 +605,32 @@
 
   // Submissions made before the spec templates shipped have no stored
   // listingText — rebuild the best block we can from what they did send.
+  // "x 1" is not a useful heading — fall back to the machine type or
+  // category when the seller used placeholders for make and model.
+  function lotDisplayName(lot){
+    var info = lot.info || {};
+    var parts = [];
+    if(String(info.make||"").trim().length > 1) parts.push(String(info.make).trim());
+    if(String(info.model||"").trim().length > 1) parts.push(String(info.model).trim());
+    if(parts.length) return parts.join(" ");
+    return info.equipTypeLabel || lot.category || "Unidentified item";
+  }
+
   function fallbackListingText(lot){
     var i = lot.info || {}, c = lot.condition || {}, out = [];
     function add(label, value){
       var v = (value==null ? "" : String(value)).trim();
       if(v && v !== "Unknown" && v !== "Not sure") out.push("• "+label+": "+v);
     }
-    add("Year", i.year); add("Make", i.make); add("Model", i.model);
-    add("Serial #", i.serial); add("Meter Reads", i.meter); add("Cut Capacity", i.cutCapacity);
+    // A single character means the seller didn't know it — keep it out of
+    // the listing block the same way the seller app does.
+    function addReal(label, value){
+      var v = (value==null ? "" : String(value)).trim();
+      if(v.length > 1) add(label, v);
+    }
+    addReal("Year", i.year); addReal("Make", i.make); addReal("Model", i.model);
+    addReal("Serial #", i.serial);
+    add("Meter Reads", i.meter); add("Cut Capacity", i.cutCapacity);
     var specs = i.specs || {};
     for(var k in specs){
       if(specs.hasOwnProperty(k)) add(k, specs[k]);
@@ -642,7 +660,7 @@
     on(back, "click", function(){ state.screen = "list"; render(); });
     app.appendChild(back);
 
-    app.appendChild(el('<h1 class="title">'+esc(info.make)+' '+esc(info.model)+'</h1>'));
+    app.appendChild(el('<h1 class="title">'+esc(lotDisplayName(lot))+'</h1>'));
     app.appendChild(el('<p class="sub">'+esc(lot.category)+' · submitted '+esc(new Date(lot.created_at).toLocaleString())+'</p>'));
 
     var htmlBtn = el('<button class="btn primary full" style="margin-bottom:14px;">Download as HTML</button>');
@@ -698,10 +716,19 @@
 
     var kvCard = el('<div class="card"></div>');
     kvCard.appendChild(el('<span class="qlabel">Basic info</span>'));
+    // Sellers are told to type a single character when they don't know a
+    // value, so call those out rather than letting them read as real data.
+    var unknownFields = [];
+    function shown(label, v){
+      v = (v==null ? "" : String(v)).trim();
+      if(!v) return "—";
+      if(v.length <= 1){ unknownFields.push(label); return esc(v)+' <span class="pill warn">seller didn\'t know</span>'; }
+      return esc(v);
+    }
     kvCard.appendChild(el(
       '<dl class="kv">'+
-      '<dt>Year</dt><dd>'+esc(info.year||"—")+'</dd>'+
-      '<dt>Serial</dt><dd>'+esc(info.serial||"—")+'</dd>'+
+      '<dt>Year</dt><dd>'+shown("Year", info.year)+'</dd>'+
+      '<dt>Serial</dt><dd>'+shown("Serial", info.serial)+'</dd>'+
       '<dt>Meter</dt><dd>'+esc(info.meter||"—")+'</dd>'+
       (info.cutCapacity ? '<dt>Cut capacity</dt><dd>'+esc(info.cutCapacity)+'</dd>' : '')+
       '<dt>Location</dt><dd>'+esc(info.location||"—")+'</dd>'+

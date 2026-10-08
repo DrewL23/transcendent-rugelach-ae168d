@@ -1319,6 +1319,14 @@
     return v;
   }
 
+  // We tell sellers to type a single character when they don't know a value,
+  // so those stand-ins must never reach the listing text as if they were real.
+  // Admin still shows the raw entry, so nothing is hidden from us.
+  function realValue(v){
+    v = knownValue(v);
+    return v.length <= 1 ? "" : v;
+  }
+
   // Bulleted spec block, in the order and wording our listings already use.
   function listingSpecLines(lot){
     var i = lot.info || {}, specs = lot.specs || {}, out = [];
@@ -1327,10 +1335,12 @@
       var v = knownValue(value);
       if(v) out.push(label+": "+v);
     }
-    add("Year", i.year);
-    add("Make", i.make);
-    add("Model", i.model);
-    add(t && t.titled ? "VIN" : "Serial #", i.serial);
+    // Identity fields go through realValue — a lone "x" or "1" here is a
+    // seller telling us they didn't know, not a serial number.
+    add("Year", realValue(i.year));
+    add("Make", realValue(i.make));
+    add("Model", realValue(i.model));
+    add(t && t.titled ? "VIN" : "Serial #", realValue(i.serial));
     add(t && t.meterLabel ? t.meterLabel : "Meter Reads", i.meter);
     if(t){ t.fields.forEach(function(f){ add(f.label, specs[f.id]); }); }
     add("Cut Capacity", i.cutCapacity);
@@ -1727,6 +1737,20 @@
   function renderBasicInfo(main, app){
     screenHeader(main, stepLabel("basicInfo"), "Basic details",
       "Grab these off the machine itself where you can — the serial plate and title, not memory.");
+
+    // Sellers were abandoning the app here because they did not have the
+    // serial or year in front of them. Getting to the photos matters more.
+    main.appendChild(el(
+      '<div class="callout">'+
+        '<h3>Don\'t know one of these yet?</h3>'+
+        '<p style="margin:6px 0 0;font-size:13.5px;line-height:1.5;">'+
+        'Don\'t go hunting for it right now. Just put a single letter or number in the box '+
+        '— like <b>x</b> or <b>1</b> — and keep going. '+
+        'That lets you get straight to the photos, which are the part we really need. '+
+        'We\'ll pick the rest up from your serial plate photo or over the phone.</p>'+
+      '</div>'
+    ));
+
     var card = el('<div class="card"></div>');
     var i = state.cur.info;
     var grid = el('<div class="grid2"></div>');
@@ -1746,7 +1770,11 @@
       function(){ state.screen="category"; render(); },
       "Next: Photos",
       function(){
-        if(!basicInfoDone()){ alert("Make, model, and serial number are required before moving on."); return; }
+        if(!basicInfoDone()){
+          alert("Make, model, and serial need something in them before moving on.\n\n" +
+                "If you don't know one yet, just type a single letter or number (like x or 1) and keep going.");
+          return;
+        }
         syncDetailsNow(state.cur);
         state.photoIndex = 0; state.screen="photos"; render();
       }
