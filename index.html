@@ -62,6 +62,9 @@
     border:1px solid var(--line); border-radius:20px; padding:3px 10px; white-space:nowrap;
   }
   .stagetrack{display:flex; gap:4px; margin-top:10px;}
+  .helprow{margin-top:8px; font-size:12.5px; color:var(--steel);}
+  .helprow a{color:var(--accent); font-weight:700; text-decoration:none; white-space:nowrap;}
+  .helpcard h3{margin-top:0;}
   .stagetrack i{flex:1; height:4px; border-radius:2px; background:var(--steel-soft); display:block;}
   .stagetrack i.done{background:var(--good);}
   .stagetrack i.active{background:var(--accent);}
@@ -222,31 +225,14 @@
   "use strict";
 
   var EMAIL_TO = "drewl@brightstarauctions.com"; // change to your cataloging intake address
+  var HELP_PHONE = "574-336-5803";               // shown to sellers throughout the app
+  var HELP_TEL   = "+15743365803";               // tel: form, so a phone dials on tap
 
   var SUPABASE_URL = "https://johrcgvbpwmlyhepckyo.supabase.co";
   var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaHJjZ3ZicHdtbHloZXBja3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTcwNTEsImV4cCI6MjEwMTM5MzA1MX0.4dPLdUYNuFP9zDflQCYJ62YtK-yFXI0UDBF2VKr6y8g";
 
   function supaReady(){
     return SUPABASE_URL.indexOf("YOUR_SUPABASE") === -1 && SUPABASE_ANON_KEY.indexOf("YOUR_SUPABASE") === -1;
-  }
-
-  // Pings our notification function so Bright Star gets an email the moment
-  // a lot lands. Deliberately fire-and-forget: the lot is already safely in
-  // the database by this point, so a failure here must never surface to the
-  // seller or block the confirmation screen.
-  function notifyBrightStar(lot){
-    if(!supaReady() || !lot || !lot.remoteId) return;
-    try{
-      fetch(SUPABASE_URL+"/functions/v1/notify-submission", {
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "apikey":SUPABASE_ANON_KEY,
-          "Authorization":"Bearer "+SUPABASE_ANON_KEY
-        },
-        body: JSON.stringify({lotId: lot.remoteId})
-      }).catch(function(){ /* ignore */ });
-    }catch(e){ /* ignore */ }
   }
 
   function uuid(){
@@ -1634,6 +1620,13 @@
       });
       top.appendChild(track);
     }
+    // "Any time" means any time — the welcome screen already has the full
+    // card, so every other screen gets this one-tap line instead.
+    if(state.screen !== "welcome"){
+      top.appendChild(el(
+        '<div class="helprow">Questions? <a href="tel:'+esc(HELP_TEL)+'">Call '+esc(HELP_PHONE)+'</a></div>'
+      ));
+    }
     root.appendChild(top);
   }
 
@@ -1682,6 +1675,16 @@
         '<h1 class="screentitle">Catalog Your Equipment</h1>'+
         '<p class="sub" style="margin:0 auto;">A guided, step-by-step walkthrough so your listing looks professional — '+
         'the same shots and details our own catalogers capture, in an order that\'s hard to mess up.</p>'+
+      '</div>'
+    ));
+    main.appendChild(el(
+      '<div class="callout helpcard">'+
+        '<h3>Questions? Just call.</h3>'+
+        '<p style="margin:6px 0 10px;font-size:14px;line-height:1.5;">'+
+        'If at any time you have any questions while using this app, please call '+
+        '<b>'+esc(HELP_PHONE)+'</b>. We would rather talk you through it than have you guess.</p>'+
+        '<a class="btn primary full" style="text-decoration:none;display:block;text-align:center;" '+
+        'href="tel:'+esc(HELP_TEL)+'">Call '+esc(HELP_PHONE)+'</a>'+
       '</div>'
     ));
     main.appendChild(el(
@@ -2380,7 +2383,6 @@
           }).then(function(){
             state.cur.uploaded = true;
             state.cur.submittedAt = new Date();
-            notifyBrightStar(state.cur);
             finishSavingLot();
           }).catch(function(err){
             state.cur.uploaded = false;
@@ -2467,7 +2469,6 @@
         }).then(function(){
           state.cur.uploaded = true;
           state.cur.submittedAt = new Date();
-          notifyBrightStar(state.cur);
           render();
         }).catch(function(){
           retryBtn.disabled = false;
