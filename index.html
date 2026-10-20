@@ -119,6 +119,7 @@
   .stepmeta{display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-bottom:2px;}
   .stepcount{font-family:var(--font-mono); font-size:12px; color:var(--steel);}
   .req{font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--warn); font-weight:700;}
+  .opt{font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--steel); font-weight:600;}
   .tip{
     font-size:13px; color:var(--steel); background:var(--surface-2); border-radius:6px;
     padding:8px 10px; margin-top:10px; border-left:3px solid var(--accent);
@@ -1893,8 +1894,9 @@
   }
 
   function renderVideo(main, app){
-    screenHeader(main, stepLabel("video"), "Operating video",
-      "This is the single most convincing thing in the whole listing — buyers who see it running bid with more confidence.");
+    screenHeader(main, stepLabel("video"), "Operating video (optional)",
+      "If the machine runs, this is the single most convincing thing in the whole listing — buyers who see it "+
+      "running bid with more confidence. <b>If it doesn't run, or a video isn't practical, just skip it.</b>");
 
     main.appendChild(el(
       '<div class="callout">'+
@@ -1913,7 +1915,7 @@
     var video = state.cur.video;
     var hasVideo = video && video.url;
     var isNA = video && video.na;
-    var meta = el('<div class="stepmeta"><span class="stepcount">OPERATING VIDEO</span>'+(isNA? '' : '<span class="req">Required</span>')+'</div>');
+    var meta = el('<div class="stepmeta"><span class="stepcount">OPERATING VIDEO</span>'+(isNA? '' : '<span class="opt">Optional</span>')+'</div>');
     card.appendChild(meta);
 
     var frame = el('<div class="frame"></div>');
@@ -1924,7 +1926,7 @@
     } else if(isNA){
       frame.appendChild(el('<div class="na">Marked not applicable</div>'));
     } else {
-      frame.appendChild(el('<div class="placeholder">No video yet — tap "Record / Choose Video" below</div>'));
+      frame.appendChild(el('<div class="placeholder">No video — record one below, or skip this step</div>'));
     }
     card.appendChild(frame);
 
@@ -1935,9 +1937,12 @@
     on(takeBtn, "click", function(){ videoInput.click(); });
     btnrow.appendChild(takeBtn);
     if(!hasVideo){
-      var naBtn = el('<button class="btn ghost">'+(isNA?"Undo — Not Applicable":"Skip — Won't Run / N/A")+'</button>');
+      // Still worth capturing as an explicit answer — it tells us the seller
+      // decided there is no video, rather than simply not getting this far.
+      var naBtn = el('<button class="btn ghost">'+(isNA?"Undo — No Video":"No Video For This Item")+'</button>');
       on(naBtn, "click", function(){
         state.cur.video = isNA ? null : {na:true};
+        syncDetailsNow(state.cur);
         render();
       });
       btnrow.appendChild(naBtn);
@@ -1946,14 +1951,12 @@
     if(hasVideo) card.appendChild(el('<div class="tip">'+esc(video.name)+' — '+formatBytes(video.size)+'</div>'));
     main.appendChild(card);
 
-    var canProceed = hasVideo || isNA;
+    // Video never blocks. Sellers were photographing an entire machine and
+    // then stalling here, which cost us the whole submission.
     renderFooter(app,
       function(){ state.photoIndex = currentCategory().steps.length-1; state.screen="photos"; render(); },
-      "Next: Machine Details",
-      function(){
-        if(!canProceed){ alert("Record a video or mark it not applicable before continuing."); return; }
-        state.screen="specs"; render();
-      }
+      (hasVideo || isNA) ? "Next: Machine Details" : "Skip — No Video",
+      function(){ state.screen="specs"; render(); }
     );
   }
 
@@ -2303,10 +2306,19 @@
 
     var v = state.cur.video;
     var vc = el('<div class="card"></div>');
-    vc.appendChild(el('<span class="qlabel">Operating video</span>'));
-    if(v && v.url) vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">'+esc(v.name)+' — '+formatBytes(v.size)+'</p>'));
-    else if(v && v.na) vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">Marked not applicable.</p>'));
-    else vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;color:var(--warn);">Not recorded — go back to add one.</p>'));
+    vc.appendChild(el('<span class="qlabel">Operating video <span class="opt">Optional</span></span>'));
+    if(v && v.url){
+      vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">'+esc(v.name)+' — '+formatBytes(v.size)+'</p>'));
+    } else if(v && v.na){
+      vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">No video for this item.</p>'));
+    } else {
+      // Encourage, never block — they can submit from here regardless.
+      vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">No video included. That\'s fine — if the machine runs, '+
+        'a short clip of it operating usually brings more money.</p>'));
+      var addVid = el('<button class="btn ghost" style="margin-top:8px;padding:6px 10px;font-size:12px;">Add a video</button>');
+      on(addVid, "click", function(){ state.screen="video"; render(); });
+      vc.appendChild(addVid);
+    }
     main.appendChild(vc);
 
     if(hasAttachPhase()){
@@ -2325,7 +2337,9 @@
     main.appendChild(ackCard);
 
     var enoughPhotos = missing===0 || usingBulkUpload();
-    var canSave = enoughPhotos && basicInfoDone() && state.cur.ack && !!(v && (v.url || v.na));
+    // Video is deliberately NOT part of this — plenty of items will never
+    // have one, and gating on it was losing us finished submissions.
+    var canSave = enoughPhotos && basicInfoDone() && state.cur.ack;
 
     // A greyed-out button with no explanation reads as "broken" or "already
     // sent" — spell out exactly what is still needed, and make each one a
@@ -2334,7 +2348,6 @@
       var blockers = [];
       if(!enoughPhotos) blockers.push({txt:"Take or upload the remaining photos ("+missing+" still missing)", go:function(){ state.photoIndex=0; state.screen="photos"; }});
       if(!basicInfoDone()) blockers.push({txt:"Fill in make, model and serial", go:function(){ state.screen="basicInfo"; }});
-      if(!(v && (v.url || v.na))) blockers.push({txt:"Add the operating video, or mark it not applicable", go:function(){ state.screen="video"; }});
       if(!state.cur.ack) blockers.push({txt:"Check the box above confirming your description is accurate", go:null});
       var bc = el('<div class="callout" style="border-color:var(--warn);"></div>');
       bc.appendChild(el('<h3>Before you can submit</h3>'));
@@ -2411,7 +2424,7 @@
           (ref ? '<dt>Reference</dt><dd><b>'+esc(ref)+'</b></dd>' : '')+
           '<dt>Submitted</dt><dd>'+esc(when)+'</dd>'+
           '<dt>Photos received</dt><dd>'+photoCount+'</dd>'+
-          '<dt>Video</dt><dd>'+(state.cur.video && state.cur.video.url ? "Received" : "Not applicable")+'</dd>'+
+          '<dt>Video</dt><dd>'+(state.cur.video && state.cur.video.url ? "Received" : "None included")+'</dd>'+
           '</dl>'+
           '<div class="qhint" style="margin-top:8px;">Write the reference down if you want it. '+
           'If you ever need to check on this item, give us that number and we can pull it up.</div>'+
