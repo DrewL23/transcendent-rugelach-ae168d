@@ -229,6 +229,25 @@
     return SUPABASE_URL.indexOf("YOUR_SUPABASE") === -1 && SUPABASE_ANON_KEY.indexOf("YOUR_SUPABASE") === -1;
   }
 
+  // Pings our notification function so Bright Star gets an email the moment
+  // a lot lands. Deliberately fire-and-forget: the lot is already safely in
+  // the database by this point, so a failure here must never surface to the
+  // seller or block the confirmation screen.
+  function notifyBrightStar(lot){
+    if(!supaReady() || !lot || !lot.remoteId) return;
+    try{
+      fetch(SUPABASE_URL+"/functions/v1/notify-submission", {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "apikey":SUPABASE_ANON_KEY,
+          "Authorization":"Bearer "+SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({lotId: lot.remoteId})
+      }).catch(function(){ /* ignore */ });
+    }catch(e){ /* ignore */ }
+  }
+
   function uuid(){
     if(window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){
@@ -2307,9 +2326,37 @@
 
     var enoughPhotos = missing===0 || usingBulkUpload();
     var canSave = enoughPhotos && basicInfoDone() && state.cur.ack && !!(v && (v.url || v.na));
+
+    // A greyed-out button with no explanation reads as "broken" or "already
+    // sent" — spell out exactly what is still needed, and make each one a
+    // link straight to the screen that fixes it.
+    if(!canSave){
+      var blockers = [];
+      if(!enoughPhotos) blockers.push({txt:"Take or upload the remaining photos ("+missing+" still missing)", go:function(){ state.photoIndex=0; state.screen="photos"; }});
+      if(!basicInfoDone()) blockers.push({txt:"Fill in make, model and serial", go:function(){ state.screen="basicInfo"; }});
+      if(!(v && (v.url || v.na))) blockers.push({txt:"Add the operating video, or mark it not applicable", go:function(){ state.screen="video"; }});
+      if(!state.cur.ack) blockers.push({txt:"Check the box above confirming your description is accurate", go:null});
+      var bc = el('<div class="callout" style="border-color:var(--warn);"></div>');
+      bc.appendChild(el('<h3>Before you can submit</h3>'));
+      var ul = el('<ul style="margin:6px 0 0;padding-left:18px;font-size:13.5px;line-height:1.7;"></ul>');
+      blockers.forEach(function(b){
+        var li = el('<li></li>');
+        if(b.go){
+          var a = el('<a href="javascript:void(0)" style="color:var(--accent);">'+esc(b.txt)+'</a>');
+          on(a, "click", function(){ b.go(); render(); });
+          li.appendChild(a);
+        } else {
+          li.textContent = b.txt;
+        }
+        ul.appendChild(li);
+      });
+      bc.appendChild(ul);
+      main.appendChild(bc);
+    }
+
     renderFooter(app,
       function(){ state.screen = hasAttachPhase() ? "attachments" : "condition"; render(); },
-      "Save This Lot",
+      "Submit to Bright Star",
       function(){
         var btn = this;
         if(supaReady()){
@@ -2319,6 +2366,8 @@
             if(total) btn.textContent = "Submitting "+done+"/"+total+"...";
           }).then(function(){
             state.cur.uploaded = true;
+            state.cur.submittedAt = new Date();
+            notifyBrightStar(state.cur);
             finishSavingLot();
           }).catch(function(err){
             state.cur.uploaded = false;
@@ -2341,16 +2390,80 @@
 
   function renderLotSaved(main, app){
     var uploaded = state.cur.uploaded;
-    var subMsg = uploaded
-      ? "Sent to Bright Star automatically. Catalog another item, or finish up below."
-      : "Saved on this device, but the automatic submission did not go through (no connection, or the admin system is not turned on yet). Download the packet at the end and email it as a backup.";
-    main.appendChild(el(
-      '<div class="card tagcard center">'+
-        '<div class="bigicon">'+(uploaded?"✅":"⚠️")+'</div>'+
-        '<h1 class="screentitle">Lot '+state.lotNum+' Saved</h1>'+
-        '<p class="sub" style="margin:0 auto;">'+(state.cur.info.make||"")+' '+(state.cur.info.model||"")+' — '+esc(subMsg)+'</p>'+
-      '</div>'
-    ));
+    var machine = ((state.cur.info.make||"")+" "+(state.cur.info.model||"")).trim();
+
+    if(uploaded){
+      var ref = state.cur.remoteId ? state.cur.remoteId.replace(/-/g,"").slice(0,8).toUpperCase() : "";
+      var when = state.cur.submittedAt ? state.cur.submittedAt.toLocaleString() : new Date().toLocaleString();
+      var photoCount = Object.keys(state.cur.photos).length + (state.cur.extraPhotos||[]).length;
+      main.appendChild(el(
+        '<div class="card tagcard center">'+
+          '<div class="bigicon">✅</div>'+
+          '<h1 class="screentitle">Submitted to Bright Star</h1>'+
+          '<p class="sub" style="margin:0 auto;"><b>'+esc(machine||"Your item")+'</b> is in our system. '+
+          'You do not need to do anything else — we have been notified and will review it.</p>'+
+        '</div>'
+      ));
+      main.appendChild(el(
+        '<div class="card">'+
+          '<span class="qlabel">Your receipt</span>'+
+          '<dl class="kv" style="margin-top:8px;">'+
+          (ref ? '<dt>Reference</dt><dd><b>'+esc(ref)+'</b></dd>' : '')+
+          '<dt>Submitted</dt><dd>'+esc(when)+'</dd>'+
+          '<dt>Photos received</dt><dd>'+photoCount+'</dd>'+
+          '<dt>Video</dt><dd>'+(state.cur.video && state.cur.video.url ? "Received" : "Not applicable")+'</dd>'+
+          '</dl>'+
+          '<div class="qhint" style="margin-top:8px;">Write the reference down if you want it. '+
+          'If you ever need to check on this item, give us that number and we can pull it up.</div>'+
+        '</div>'
+      ));
+      main.appendChild(el(
+        '<div class="callout">'+
+          '<h3>What happens next</h3>'+
+          '<ol>'+
+            '<li>Our team reviews your photos and details.</li>'+
+            '<li>We call you if anything is missing or unclear.</li>'+
+            '<li>We write the listing and send you the link to look over before it goes live.</li>'+
+          '</ol>'+
+        '</div>'
+      ));
+    } else {
+      main.appendChild(el(
+        '<div class="card tagcard center">'+
+          '<div class="bigicon">⚠️</div>'+
+          '<h1 class="screentitle">Not Sent Yet</h1>'+
+          '<p class="sub" style="margin:0 auto;"><b>'+esc(machine||"Your item")+'</b> is saved on this device, but it did '+
+          '<b>not</b> reach Bright Star — usually a weak signal. Your photos are not lost.</p>'+
+        '</div>'
+      ));
+      main.appendChild(el(
+        '<div class="callout" style="border-color:var(--warn);">'+
+          '<h3>Please do one of these</h3>'+
+          '<ol>'+
+            '<li>Move somewhere with better signal, then tap <b>Try Sending Again</b> below.</li>'+
+            '<li>Or tap <b>Finish Session</b>, download the packet, and email it to '+esc(EMAIL_TO)+'.</li>'+
+          '</ol>'+
+        '</div>'
+      ));
+      var retryBtn = el('<button class="btn primary full" style="margin-bottom:10px;">Try Sending Again</button>');
+      on(retryBtn, "click", function(){
+        retryBtn.disabled = true;
+        retryBtn.textContent = "Sending...";
+        finalizeLot(state.cur, function(done, total){
+          if(total) retryBtn.textContent = "Sending "+done+"/"+total+"...";
+        }).then(function(){
+          state.cur.uploaded = true;
+          state.cur.submittedAt = new Date();
+          notifyBrightStar(state.cur);
+          render();
+        }).catch(function(){
+          retryBtn.disabled = false;
+          retryBtn.textContent = "Try Sending Again";
+          alert("Still could not reach Bright Star. Check your signal, or finish up and email the packet instead.");
+        });
+      });
+      main.appendChild(retryBtn);
+    }
     var btns = el('<div class="btnrow" style="flex-direction:column;"></div>');
     var addBtn = el('<button class="btn primary full">Catalog Another Item</button>');
     on(addBtn, "click", function(){
