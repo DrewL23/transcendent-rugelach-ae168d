@@ -1584,8 +1584,167 @@
     return activeStages().indexOf(s);
   }
 
+  // -------------------------------------------------------------------------
+  // Session recovery.
+  //
+  // Everything used to live in memory, so one stray tap, a reload, or the
+  // phone reclaiming the tab sent a seller back to the welcome screen with
+  // nothing to return to — people were redoing 25 photos from scratch.
+  //
+  // Photos are already uploaded one at a time as they are taken, so the
+  // server is the real source of truth. We only need to remember *which lot*
+  // this device was working on; the heavy image data is deliberately NOT put
+  // in localStorage (30 photos would blow the quota).
+  // -------------------------------------------------------------------------
+  var SESSION_KEY = "bsa_catalog_session_v2";
+
+  function saveSession(){
+    try{
+      var c = state.cur;
+      if(!c || (!c.remoteId && !c.category)) return;
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        v:2,
+        savedAt: Date.now(),
+        screen: state.screen,
+        photoIndex: state.photoIndex,
+        lotNum: state.lotNum,
+        cur: {
+          remoteId: c.remoteId,
+          category: c.category,
+          equipType: c.equipType,
+          info: c.info,
+          specs: c.specs,
+          story: c.story,
+          cond: c.cond,
+          attach: c.attach,
+          attachOther: c.attachOther,
+          naFlags: c.naFlags,
+          uploadedPaths: c.uploadedPaths,
+          uploadedDamage: c.uploadedDamage,
+          videoUploaded: c.videoUploaded,
+          videoNa: !!(c.video && c.video.na),
+          damageNotes: (c.damage||[]).map(function(d){ return {id:d.id, note:d.note}; })
+        }
+      }));
+    }catch(e){ /* private mode or quota — recovery is best-effort */ }
+  }
+
+  function loadSession(){
+    try{
+      var raw = localStorage.getItem(SESSION_KEY);
+      if(!raw) return null;
+      var s = JSON.parse(raw);
+      return (s && s.v === 2 && s.cur) ? s : null;
+    }catch(e){ return null; }
+  }
+
+  function clearSession(){
+    try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+  }
+
+  function savedSessionLabel(s){
+    var i = (s && s.cur && s.cur.info) || {};
+    var name = [i.make, i.model].filter(function(x){
+      return String(x||"").trim().length > 1;
+    }).join(" ");
+    if(!name) name = (s.cur.category && CATEGORIES[s.cur.category]) ? CATEGORIES[s.cur.category].label : "your item";
+    return name;
+  }
+
+  function savedShotCount(s){
+    var up = (s && s.cur && s.cur.uploadedPaths) || {};
+    var na = (s && s.cur && s.cur.naFlags) || {};
+    return Object.keys(up).length + Object.keys(na).length;
+  }
+
+  // Rebuild a working lot from a saved snapshot. Photos come back as
+  // "already uploaded" markers rather than images — the bytes are on the
+  // server and the seller does not need to see them again to continue.
+  function lotFromSnapshot(snap){
+    var lot = freshLot();
+    lot.remoteId      = snap.remoteId || null;
+    lot.category      = snap.category || null;
+    lot.equipType     = snap.equipType || null;
+    lot.info          = snap.info || lot.info;
+    lot.specs         = snap.specs || {};
+    lot.story         = snap.story || lot.story;
+    lot.cond          = snap.cond || lot.cond;
+    lot.attach        = snap.attach || [];
+    lot.attachOther   = snap.attachOther || "";
+    lot.naFlags       = snap.naFlags || {};
+    lot.uploadedPaths = snap.uploadedPaths || {};
+    lot.uploadedDamage= snap.uploadedDamage || {};
+    lot.videoUploaded = snap.videoUploaded || null;
+    if(snap.videoNa) lot.video = {na:true};
+    else if(snap.videoUploaded) lot.video = {name:snap.videoUploaded.name, size:snap.videoUploaded.size, restored:true};
+    (snap.damageNotes||[]).forEach(function(d){
+      lot.damage.push({id:d.id, note:d.note||"", dataUrl:null});
+    });
+    lot.resumed = true;
+    return lot;
+  }
+
+  function resumeFromSnapshot(s){
+    state.cur = lotFromSnapshot(s.cur);
+    state.lotNum = s.lotNum || 1;
+    state.photoIndex = s.photoIndex || 0;
+    var cat = CATEGORIES[state.cur.category];
+    if(!cat || state.photoIndex >= cat.steps.length) state.photoIndex = 0;
+    state.screen = s.screen && s.screen !== "welcome" ? s.screen : "photos";
+    render();
+  }
+
+  // Pull a lot straight off the server by id. This is what a "pick up where
+  // you left off" link uses, so a seller can resume on a different phone, or
+  // after clearing their browser.
+  function resumeFromServer(lotId, onDone, onFail){
+    if(!supaReady()){ onFail("Not connected."); return; }
+    fetch(SUPABASE_URL+"/rest/v1/lots?id=eq."+encodeURIComponent(lotId)+"&select=*", {
+      headers:{apikey:SUPABASE_ANON_KEY, Authorization:"Bearer "+SUPABASE_ANON_KEY}
+    }).then(function(res){
+      if(!res.ok) throw new Error("lookup failed");
+      return res.json();
+    }).then(function(rows){
+      if(!rows || !rows.length) throw new Error("not found");
+      var row = rows[0];
+      if(row.status && row.status !== "in_progress") throw new Error("already submitted");
+      var info = row.info || {};
+      var snap = {
+        remoteId: row.id,
+        category: row.category,
+        equipType: info.equipType || null,
+        info: info,
+        specs: info.specs || {},
+        story: info.story || {owners:"", maintenance:"", updates:"", other:""},
+        cond: row.condition || {},
+        attach: (row.attach && row.attach.list) || [],
+        attachOther: (row.attach && row.attach.other) || "",
+        naFlags: {},
+        uploadedPaths: {},
+        uploadedDamage: {},
+        videoUploaded: (row.video && row.video.path) ? row.video : null,
+        videoNa: !!(row.video && row.video.na),
+        damageNotes: (row.damage||[]).map(function(d, i2){ return {id:"restored-"+i2, note:d.note||""}; })
+      };
+      (row.photos||[]).forEach(function(p){
+        if(p && p.stepId) snap.uploadedPaths[p.stepId] = p;
+      });
+      state.cur = lotFromSnapshot(snap);
+      state.lotNum = 1;
+      state.photoIndex = 0;
+      state.screen = "photos";
+      saveSession();
+      render();
+      if(onDone) onDone();
+    }).catch(function(err){
+      if(onFail) onFail(err && err.message ? err.message : "could not load");
+    });
+  }
+
+  // A shot counts as done if we hold the image, the seller marked it N/A, or
+  // it already made it to the server on an earlier visit.
   function photoStepDone(step){
-    return !!state.cur.photos[step.id] || !!state.cur.naFlags[step.id];
+    return !!state.cur.photos[step.id] || !!state.cur.naFlags[step.id] || !!state.cur.uploadedPaths[step.id];
   }
   function allPhotosDone(){
     var cat = currentCategory(); if(!cat) return false;
@@ -1624,7 +1783,8 @@
     // card, so every other screen gets this one-tap line instead.
     if(state.screen !== "welcome"){
       top.appendChild(el(
-        '<div class="helprow">Questions? <a href="tel:'+esc(HELP_TEL)+'">Call '+esc(HELP_PHONE)+'</a></div>'
+        '<div class="helprow">Questions? <a href="tel:'+esc(HELP_TEL)+'">Call '+esc(HELP_PHONE)+'</a>'+
+        '<span style="float:right;opacity:.8;">Saved automatically</span></div>'
       ));
     }
     root.appendChild(top);
@@ -1637,6 +1797,9 @@
   }
 
   function render(){
+    // Every state change funnels through here, so this is the one place that
+    // needs to remember where the seller is.
+    saveSession();
     var app = document.getElementById("app");
     app.innerHTML = "";
     renderTopbar(app);
@@ -1669,6 +1832,34 @@
   }
 
   function renderWelcome(main, app){
+    // If this device was mid-catalog, that is the first thing they see.
+    var saved = loadSession();
+    if(saved && saved.cur && (saved.cur.remoteId || saved.cur.category)){
+      var shots = savedShotCount(saved);
+      var resumeCard = el(
+        '<div class="card tagcard" style="border-color:var(--accent);">'+
+          '<span class="qlabel">You have an item in progress</span>'+
+          '<p style="font-size:15px;margin:8px 0 2px;"><b>'+esc(savedSessionLabel(saved))+'</b></p>'+
+          '<p class="qhint" style="margin:0 0 12px;">'+
+            (shots ? shots+' photo'+(shots===1?'':'s')+' already saved' : 'Just started')+
+            ' — nothing you did was lost.</p>'+
+        '</div>'
+      );
+      var goBtn = el('<button class="btn primary full">Pick Up Where I Left Off</button>');
+      on(goBtn, "click", function(){ resumeFromSnapshot(saved); });
+      resumeCard.appendChild(goBtn);
+      var dropBtn = el('<button class="btn ghost full" style="margin-top:8px;">Start Something New Instead</button>');
+      on(dropBtn, "click", function(){
+        if(!confirm("Start a new item?\n\nYour in-progress item stays safe with us — this just sets it aside so you can begin another one.")) return;
+        clearSession();
+        state.cur = freshLot();
+        state.screen = "category";
+        render();
+      });
+      resumeCard.appendChild(dropBtn);
+      main.appendChild(resumeCard);
+    }
+
     main.appendChild(el(
       '<div class="card tagcard center">'+
         '<div class="bigicon">🚜</div>'+
@@ -1817,10 +2008,16 @@
     var frame = el('<div class="frame"></div>');
     var photo = state.cur.photos[step.id];
     var isNA = state.cur.naFlags[step.id];
+    var alreadySent = !photo && !isNA && !!state.cur.uploadedPaths[step.id];
     if(photo){
       frame.appendChild(el('<img src="'+photo+'">'));
     } else if(isNA){
       frame.appendChild(el('<div class="na">Marked not applicable</div>'));
+    } else if(alreadySent){
+      // Resumed session: the image is safely on our server, we just are not
+      // holding a copy on the phone any more.
+      frame.appendChild(el('<div class="na">✅ Already sent to Bright Star<br>'+
+        '<span style="font-size:12px;opacity:.75;">Retake it below only if you want to replace it.</span></div>'));
     } else {
       frame.appendChild(el('<div class="placeholder">No photo yet — take one below, or pick it from your gallery</div>'));
     }
@@ -1829,7 +2026,7 @@
     card.appendChild(el('<div class="rotatebanner">📱 Turn your phone to the side and take photos from the side to get the full width of the picture.</div>'));
 
     var btnrow = el('<div class="btnrow"></div>');
-    var takeBtn = el('<button class="btn primary">'+(photo?"Retake Photo":"Take Photo")+'</button>');
+    var takeBtn = el('<button class="btn primary">'+((photo||alreadySent)?"Retake Photo":"Take Photo")+'</button>');
     on(takeBtn, "click", function(){ openCamera({type:"step", id:step.id}); });
     btnrow.appendChild(takeBtn);
     var galBtn = el('<button class="btn">Choose from Gallery</button>');
@@ -1921,6 +2118,7 @@
     var meta = el('<div class="stepmeta"><span class="stepcount">OPERATING VIDEO</span>'+(isNA? '' : '<span class="opt">Optional</span>')+'</div>');
     card.appendChild(meta);
 
+    var videoAlreadySent = !hasVideo && !isNA && !!state.cur.videoUploaded;
     var frame = el('<div class="frame"></div>');
     if(hasVideo){
       var vtag = el('<video controls style="width:100%;height:100%;object-fit:contain;background:#000;"></video>');
@@ -1928,6 +2126,8 @@
       frame.appendChild(vtag);
     } else if(isNA){
       frame.appendChild(el('<div class="na">Marked not applicable</div>'));
+    } else if(videoAlreadySent){
+      frame.appendChild(el('<div class="na">✅ Video already sent to Bright Star</div>'));
     } else {
       frame.appendChild(el('<div class="placeholder">No video — record one below, or skip this step</div>'));
     }
@@ -2247,6 +2447,7 @@
       var t;
       if(photo){ t = el('<div class="t"><img src="'+photo+'"><span class="lbl">'+esc(s.title)+'</span></div>'); }
       else if(na){ t = el('<div class="t"><span class="lbl">'+esc(s.title)+' — N/A</span></div>'); }
+      else if(state.cur.uploadedPaths[s.id]){ t = el('<div class="t"><span class="lbl">✅ '+esc(s.title)+' — sent</span></div>'); }
       else { t = el('<div class="t missing"><span>'+esc(s.title)+' missing</span></div>'); }
       on(t, "click", function(){ state.photoIndex = cat.steps.indexOf(s); state.screen="photos"; render(); });
       thumbs.appendChild(t);
@@ -2312,6 +2513,8 @@
     vc.appendChild(el('<span class="qlabel">Operating video <span class="opt">Optional</span></span>'));
     if(v && v.url){
       vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">'+esc(v.name)+' — '+formatBytes(v.size)+'</p>'));
+    } else if(state.cur.videoUploaded){
+      vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">✅ Already sent to Bright Star.</p>'));
     } else if(v && v.na){
       vc.appendChild(el('<p style="font-size:14px;margin:8px 0 0;">No video for this item.</p>'));
     } else {
@@ -2399,6 +2602,9 @@
 
   function finishSavingLot(){
     state.lots.push(state.cur);
+    // Only forget the saved session once it is actually off the device.
+    // A failed submit keeps it, so they can close the app and still resume.
+    if(state.cur.uploaded) clearSession();
     state.screen = "lotSaved";
     render();
   }
@@ -2481,6 +2687,7 @@
     var btns = el('<div class="btnrow" style="flex-direction:column;"></div>');
     var addBtn = el('<button class="btn primary full">Catalog Another Item</button>');
     on(addBtn, "click", function(){
+      clearSession();
       state.lotNum++; state.cur = freshLot(); state.screen = "category"; render();
     });
     var doneBtn = el('<button class="btn full">Finish Session</button>');
@@ -2672,7 +2879,53 @@
     return parts.join("\n");
   }
 
-  render();
+  // --- boot -----------------------------------------------------------------
+
+  // Warn before the page goes away mid-catalog. Browsers only honour this
+  // after the seller has interacted with the page, which is exactly when it
+  // matters. It covers the back button, closing the tab, and stray taps.
+  window.addEventListener("beforeunload", function(e){
+    var c = state.cur;
+    var working = c && (c.remoteId || c.category) &&
+                  state.screen !== "welcome" && state.screen !== "finish" && state.screen !== "lotSaved";
+    if(!working) return;
+    e.preventDefault();
+    e.returnValue = "";
+    return "";
+  });
+
+  function boot(){
+    // A "pick up where you left off" link wins over anything on this device,
+    // so the same link works on a seller's other phone or a fresh browser.
+    var m = /[?&]lot=([0-9a-fA-F-]{36})/.exec(window.location.search);
+    if(m){
+      var app = document.getElementById("app");
+      app.innerHTML = '<main><div class="card tagcard center">'+
+        '<div class="bigicon">⏳</div><h1 class="screentitle">Finding your item…</h1>'+
+        '<p class="sub" style="margin:0 auto;">One moment while we load the photos you already sent.</p></div></main>';
+      resumeFromServer(m[1], null, function(reason){
+        var note = reason === "already submitted"
+          ? "That item has already been submitted — nothing further is needed."
+          : "We could not find that item. It may have been submitted already, or the link may be incomplete.";
+        state.screen = "welcome";
+        render();
+        alert(note+"\n\nIf you think this is wrong, please call "+HELP_PHONE+".");
+      });
+      return;
+    }
+
+    // Otherwise, drop straight back into an in-progress item on this device
+    // rather than making them find their way from the welcome screen.
+    var saved = loadSession();
+    if(saved && saved.cur && (saved.cur.remoteId || saved.cur.category) &&
+       saved.screen && saved.screen !== "welcome"){
+      resumeFromSnapshot(saved);
+      return;
+    }
+    render();
+  }
+
+  boot();
 })();
 </script>
 </body>

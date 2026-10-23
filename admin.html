@@ -84,6 +84,9 @@
   "use strict";
 
   var SUPABASE_URL = "https://johrcgvbpwmlyhepckyo.supabase.co";
+  // Where sellers use the app — used to build "resume where you left off" links.
+  // Derived from this page's own location so it keeps working if the site moves.
+  var SELLER_APP_URL = window.location.href.replace(/admin\.html.*$/, "").replace(/[?#].*$/, "");
   var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaHJjZ3ZicHdtbHloZXBja3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTcwNTEsImV4cCI6MjEwMTM5MzA1MX0.4dPLdUYNuFP9zDflQCYJ62YtK-yFXI0UDBF2VKr6y8g";
   var BUCKET = "catalog-uploads";
 
@@ -670,6 +673,37 @@
     // Paste-ready listing block. The seller app builds this as they type and
     // stores it on info.listingText; older submissions predate that, so fall
     // back to assembling what we can from the raw fields.
+    // An in-progress seller can be dropped straight back where they stopped.
+    // Text them this link rather than letting them start over.
+    if(lot.status === "in_progress"){
+      var resumeUrl = SELLER_APP_URL + "?lot=" + lot.id;
+      var rc = el('<div class="card" style="border-color:var(--accent);"></div>');
+      rc.appendChild(el('<span class="qlabel">Still in progress — send them back to it</span>'));
+      rc.appendChild(el('<div class="qhint">Text or email this link to '+
+        esc((info.seller||"the seller"))+'. It reopens their item with every photo they already sent, '+
+        'on any phone, so nothing gets redone.</div>'));
+      var rta = el('<textarea class="listingbox" style="min-height:62px;" spellcheck="false"></textarea>');
+      rta.value = resumeUrl;
+      rc.appendChild(rta);
+      var rbtn = el('<button class="btn primary full" style="margin-top:8px;">Copy resume link</button>');
+      on(rbtn, "click", function(){
+        rta.focus(); rta.select();
+        function ok(){
+          rbtn.textContent = "Copied";
+          setTimeout(function(){ rbtn.textContent = "Copy resume link"; }, 1600);
+        }
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(rta.value).then(ok, function(){
+            try{ document.execCommand("copy"); ok(); }catch(e){ alert("Press Ctrl+C to copy."); }
+          });
+        } else {
+          try{ document.execCommand("copy"); ok(); }catch(e){ alert("Press Ctrl+C to copy."); }
+        }
+      });
+      rc.appendChild(rbtn);
+      app.appendChild(rc);
+    }
+
     var listCard = el('<div class="card"></div>');
     listCard.appendChild(el('<span class="qlabel">Listing text — paste into the auction form</span>'));
     if(info.equipTypeLabel){
