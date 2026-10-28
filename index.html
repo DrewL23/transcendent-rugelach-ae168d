@@ -369,6 +369,12 @@
     info.specs = lot.specs || {};
     info.story = lot.story || {};
     info.listingText = listingText(lot);
+    // Tapping Submit is the seller's accuracy acknowledgement, so it is
+    // worth keeping a record of rather than leaving it in memory.
+    if(lot.ack){
+      info.acknowledged = true;
+      info.acknowledgedAt = (lot.submittedAt || new Date()).toISOString();
+    }
     return info;
   }
 
@@ -1958,8 +1964,8 @@
       '<div class="callout">'+
         '<h3>Don\'t know one of these yet?</h3>'+
         '<p style="margin:6px 0 0;font-size:13.5px;line-height:1.5;">'+
-        'Don\'t go hunting for it right now. Just put a single letter or number in the box '+
-        '— like <b>x</b> or <b>1</b> — and keep going. '+
+        'Don\'t go hunting for it right now. <b>Leave it blank and keep going</b> — '+
+        'nothing here is required. '+
         'That lets you get straight to the photos, which are the part we really need. '+
         'We\'ll pick the rest up from your serial plate photo or over the phone.</p>'+
       '</div>'
@@ -1984,11 +1990,8 @@
       function(){ state.screen="category"; render(); },
       "Next: Photos",
       function(){
-        if(!basicInfoDone()){
-          alert("Make, model, and serial need something in them before moving on.\n\n" +
-                "If you don't know one yet, just type a single letter or number (like x or 1) and keep going.");
-          return;
-        }
+        // Photos are what we actually need, and anything typed here reaches
+        // us live regardless — so don't hold anyone up over a blank box.
         syncDetailsNow(state.cur);
         state.photoIndex = 0; state.screen="photos"; render();
       }
@@ -2054,10 +2057,9 @@
       },
       state.photoIndex === cat.steps.length-1 ? "Next: Video" : "Next Photo",
       function(){
-        if(!photoStepDone(step) && !usingBulkUpload()){
-          alert("Take a photo, pick one from your gallery, or mark this shot not applicable before continuing.");
-          return;
-        }
+        // Never block on a shot. Plenty of them genuinely cannot be taken —
+        // no title in hand, a tire against a wall — and a seller stuck on one
+        // photo is a seller who never submits at all.
         if(state.photoIndex === cat.steps.length-1){ state.screen="video"; }
         else { state.photoIndex++; }
         render();
@@ -2534,50 +2536,49 @@
       main.appendChild(ac);
     }
 
-    var ackCard = el('<div class="card"></div>');
-    var ackLbl = el('<label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;"><input type="checkbox" style="margin-top:3px;accent-color:var(--accent);">I\'ve described this item accurately and to the best of my knowledge, including any known defects.</label>');
-    var ackInput = ackLbl.querySelector("input");
-    ackInput.checked = state.cur.ack;
-    on(ackInput, "change", function(){ state.cur.ack = ackInput.checked; render(); });
-    ackCard.appendChild(ackLbl);
-    main.appendChild(ackCard);
-
+    // Nothing blocks submitting. Everything on this screen reached us the
+    // moment the seller entered it, so a gate here only stops them telling
+    // us they are finished — it never withheld anything from us.
     var enoughPhotos = missing===0 || usingBulkUpload();
-    // Video is deliberately NOT part of this — plenty of items will never
-    // have one, and gating on it was losing us finished submissions.
-    var canSave = enoughPhotos && basicInfoDone() && state.cur.ack;
+    var gaps = [];
+    if(!enoughPhotos) gaps.push({txt:missing+" photo"+(missing===1?"":"s")+" from the shot list not taken", go:function(){ state.photoIndex=0; state.screen="photos"; }});
+    if(!basicInfoDone()) gaps.push({txt:"Make, model or serial still blank", go:function(){ state.screen="basicInfo"; }});
+    if(!(v && (v.url || v.na)) && !state.cur.videoUploaded) gaps.push({txt:"No operating video", go:function(){ state.screen="video"; }});
 
-    // A greyed-out button with no explanation reads as "broken" or "already
-    // sent" — spell out exactly what is still needed, and make each one a
-    // link straight to the screen that fixes it.
-    if(!canSave){
-      var blockers = [];
-      if(!enoughPhotos) blockers.push({txt:"Take or upload the remaining photos ("+missing+" still missing)", go:function(){ state.photoIndex=0; state.screen="photos"; }});
-      if(!basicInfoDone()) blockers.push({txt:"Fill in make, model and serial", go:function(){ state.screen="basicInfo"; }});
-      if(!state.cur.ack) blockers.push({txt:"Check the box above confirming your description is accurate", go:null});
-      var bc = el('<div class="callout" style="border-color:var(--warn);"></div>');
-      bc.appendChild(el('<h3>Before you can submit</h3>'));
-      var ul = el('<ul style="margin:6px 0 0;padding-left:18px;font-size:13.5px;line-height:1.7;"></ul>');
-      blockers.forEach(function(b){
+    if(gaps.length){
+      var bc = el('<div class="callout"></div>');
+      bc.appendChild(el('<h3>You can submit now</h3>'));
+      bc.appendChild(el('<p style="margin:6px 0 0;font-size:13.5px;line-height:1.6;">'+
+        'These are still open. None of them stop you — send it in and we will follow up if we need anything.</p>'));
+      var ul = el('<ul style="margin:8px 0 0;padding-left:18px;font-size:13.5px;line-height:1.7;"></ul>');
+      gaps.forEach(function(b){
         var li = el('<li></li>');
-        if(b.go){
-          var a = el('<a href="javascript:void(0)" style="color:var(--accent);">'+esc(b.txt)+'</a>');
-          on(a, "click", function(){ b.go(); render(); });
-          li.appendChild(a);
-        } else {
-          li.textContent = b.txt;
-        }
+        var a = el('<a href="javascript:void(0)" style="color:var(--accent);">'+esc(b.txt)+'</a>');
+        on(a, "click", function(){ b.go(); render(); });
+        li.appendChild(a);
         ul.appendChild(li);
       });
       bc.appendChild(ul);
       main.appendChild(bc);
     }
 
+    // The accuracy statement stays, but as a condition of the act of
+    // submitting rather than one more box to find and tick.
+    main.appendChild(el(
+      '<p style="font-size:12.5px;color:var(--steel);line-height:1.6;margin:14px 2px 0;">'+
+      'By submitting, you confirm you have described this item accurately and to the best of '+
+      'your knowledge, including any known defects.</p>'
+    ));
+
     renderFooter(app,
       function(){ state.screen = hasAttachPhase() ? "attachments" : "condition"; render(); },
       "Submit to Bright Star",
       function(){
         var btn = this;
+        // Tapping Submit *is* the acknowledgement now, so record it — before
+        // finalizeLot runs, so the timestamp rides along with the payload.
+        state.cur.ack = true;
+        state.cur.submittedAt = new Date();
         if(supaReady()){
           btn.disabled = true;
           btn.textContent = "Submitting...";
@@ -2595,8 +2596,7 @@
           state.cur.uploaded = false;
           finishSavingLot();
         }
-      },
-      !canSave
+      }
     );
   }
 

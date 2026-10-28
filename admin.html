@@ -767,6 +767,10 @@
       (info.cutCapacity ? '<dt>Cut capacity</dt><dd>'+esc(info.cutCapacity)+'</dd>' : '')+
       '<dt>Location</dt><dd>'+esc(info.location||"—")+'</dd>'+
       '<dt>Seller</dt><dd>'+esc(info.seller||"—")+'</dd>'+
+      (info.acknowledged
+        ? '<dt>Accuracy statement</dt><dd>Accepted on submit'+
+          (info.acknowledgedAt ? ' — '+esc(new Date(info.acknowledgedAt).toLocaleString()) : '')+'</dd>'
+        : '')+
       '</dl>'
     ));
     app.appendChild(kvCard);
