@@ -187,6 +187,9 @@
     position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.55); color:#fff;
     font-size:9.5px; padding:3px 5px; line-height:1.2;
   }
+  .rmthumb{position:absolute; top:3px; right:3px; width:22px; height:22px; line-height:20px;
+    border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:15px;
+    cursor:pointer; padding:0; text-align:center;}
   .thumbgrid .t.missing{display:flex; align-items:center; justify-content:center; border:1px dashed var(--warn);}
   .thumbgrid .t.missing span{font-size:10px; color:var(--warn); text-align:center; padding:4px;}
 
@@ -1449,6 +1452,12 @@
       } else if(pendingTarget.type === "damage"){
         pendingTarget.item.dataUrl = dataUrl;
         syncDamageLive(state.cur, pendingTarget.item);
+      } else if(pendingTarget.type === "extra"){
+        // Anything beyond the shot list — the seller knows their machine
+        // better than our list does.
+        var ei = state.cur.extraPhotos.length;
+        state.cur.extraPhotos.push({dataUrl:dataUrl, name:"extra-"+(ei+1)});
+        syncExtraPhotoLive(state.cur, ei);
       }
       pendingTarget = null;
       render();
@@ -2047,7 +2056,7 @@
     if(step.tip) card.appendChild(el('<div class="tip">'+esc(step.tip)+'</div>'));
     main.appendChild(card);
 
-    main.appendChild(bulkUploadCard());
+    main.appendChild(extraPhotosCard());
 
     renderFooter(app,
       function(){
@@ -2067,32 +2076,84 @@
     );
   }
 
-  function usingBulkUpload(){ return state.cur.extraPhotos.length > 0; }
+  // A seller who uploaded a big batch from their gallery has effectively
+  // covered the shot list. One or two extra close-ups have not — those are
+  // additions to the list, not a replacement for it.
+  function usingBulkUpload(){ return state.cur.extraPhotos.length >= 10; }
 
-  function bulkUploadCard(){
+  // Extra photos — anything beyond the fixed shot list. The list is the
+  // minimum we need, not a limit: sellers often know the one angle that
+  // sells the machine, and they can shoot it with the camera right here.
+  function extraPhotosCard(){
     var card = el('<div class="card"></div>');
     var count = state.cur.extraPhotos.length;
-    card.appendChild(el('<span class="qlabel">Already took photos on your phone?</span>'));
-    card.appendChild(el('<div class="qhint">Pick them straight out of your gallery instead of retaking them — you can select as many as you want at once. Do this and you can skip the shot-by-shot list.</div>'));
+    card.appendChild(el('<span class="qlabel">Extra photos <span class="opt">As many as you like</span></span>'));
+    card.appendChild(el('<div class="qhint">The shot list is the minimum we need — it is not a limit. '+
+      'Add anything else that shows the machine well: attachments, recent repairs, close-ups of wear, '+
+      'paperwork, or a better angle. Take them now, or pick ones you already have.</div>'));
 
     if(bulkBusy){
       card.appendChild(el('<div class="tip">Adding photos — '+bulkBusy.done+' of '+bulkBusy.total+' done. Keep this page open.</div>'));
     }
 
-    var btn = el('<button class="btn '+(count?"":"primary")+' full" style="margin-top:10px;">'+(count?"Add More From Gallery":"Select Photos From Gallery")+'</button>');
-    if(bulkBusy) btn.disabled = true;
-    on(btn, "click", function(){ bulkInput.click(); });
-    card.appendChild(btn);
+    var btnrow = el('<div class="btnrow" style="margin-top:10px;"></div>');
+
+    var camBtn = el('<button class="btn primary">📷 Take Another Photo</button>');
+    if(bulkBusy) camBtn.disabled = true;
+    on(camBtn, "click", function(){ openCamera({type:"extra"}); });
+    btnrow.appendChild(camBtn);
+
+    var oneBtn = el('<button class="btn">From Gallery</button>');
+    if(bulkBusy) oneBtn.disabled = true;
+    on(oneBtn, "click", function(){ openGallery({type:"extra"}); });
+    btnrow.appendChild(oneBtn);
+
+    card.appendChild(btnrow);
+
+    var manyBtn = el('<button class="btn ghost full" style="margin-top:8px;">Select Several From Gallery At Once</button>');
+    if(bulkBusy) manyBtn.disabled = true;
+    on(manyBtn, "click", function(){ bulkInput.click(); });
+    card.appendChild(manyBtn);
 
     if(count){
-      card.appendChild(el('<p style="font-size:13px;margin:10px 0 0;"><b>'+count+' photo'+(count===1?"":"s")+'</b> added from your gallery.</p>'));
+      card.appendChild(el('<p style="font-size:13px;margin:12px 0 0;"><b>'+count+' extra photo'+(count===1?"":"s")+'</b> added.</p>'));
       var grid = el('<div class="thumbgrid"></div>');
       state.cur.extraPhotos.forEach(function(x, i2){
-        grid.appendChild(el('<div class="t"><img src="'+x.dataUrl+'"><span class="lbl">Uploaded '+(i2+1)+'</span></div>'));
+        var t = el('<div class="t"></div>');
+        if(x.dataUrl) t.appendChild(el('<img src="'+x.dataUrl+'">'));
+        else t.appendChild(el('<span class="lbl">✅ Extra '+(i2+1)+' — sent</span>'));
+        if(x.dataUrl) t.appendChild(el('<span class="lbl">Extra '+(i2+1)+'</span>'));
+        var rm = el('<button class="rmthumb" title="Remove">×</button>');
+        on(rm, "click", function(ev){
+          ev.stopPropagation();
+          if(!confirm("Remove this extra photo?")) return;
+          removeExtraPhoto(i2);
+        });
+        t.appendChild(rm);
+        grid.appendChild(t);
       });
       card.appendChild(grid);
     }
     return card;
+  }
+
+  // Extra photos are keyed by position ("extra-0", "extra-1", ...), so
+  // dropping one in the middle would make every later key point at the wrong
+  // image. Rebuild the whole set of keys after a removal.
+  function removeExtraPhoto(index){
+    var lot = state.cur;
+    lot.extraPhotos.splice(index, 1);
+    Object.keys(lot.uploadedPaths).forEach(function(k){
+      if(k.indexOf("extra-") === 0) delete lot.uploadedPaths[k];
+    });
+    lot.extraPhotos.forEach(function(x, i2){
+      if(x.dataUrl) syncExtraPhotoLive(lot, i2);
+    });
+    if(supaReady()){
+      var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
+      patchRemoteLot(lot, {photos:photoRefs});
+    }
+    render();
   }
 
   function renderVideo(main, app){
@@ -2436,11 +2497,12 @@
     var bulkCount = state.cur.extraPhotos.length;
     var card = el('<div class="card"></div>');
     var shotStatus = missing
-      ? (bulkCount ? '<span class="pill good">'+bulkCount+' uploaded from gallery</span>' : '<span class="pill warn">'+missing+' missing</span>')
+      ? (usingBulkUpload() ? '<span class="pill good">'+bulkCount+' photos added</span>' : '<span class="pill warn">'+missing+' of the list missing</span>')
       : '<span class="pill good">All shots complete</span>';
-    card.appendChild(el('<span class="qlabel">'+esc(cat.label)+' — '+shotStatus+'</span>'));
-    if(missing && bulkCount){
-      card.appendChild(el('<div class="qhint">You uploaded photos from your gallery, so the shot-by-shot list below is optional. Anything still marked missing just was not taken from that specific angle — our team will follow up if we need more.</div>'));
+    var extraPill = bulkCount ? ' <span class="pill good">+'+bulkCount+' extra</span>' : '';
+    card.appendChild(el('<span class="qlabel">'+esc(cat.label)+' — '+shotStatus+(missing && usingBulkUpload() ? '' : extraPill)+'</span>'));
+    if(missing && usingBulkUpload()){
+      card.appendChild(el('<div class="qhint">You added a batch of your own photos, so the shot-by-shot list below is optional. Anything still marked missing just was not taken from that specific angle — our team will follow up if we need more.</div>'));
     }
     var thumbs = el('<div class="thumbgrid"></div>');
     cat.steps.forEach(function(s){
@@ -2457,7 +2519,7 @@
     card.appendChild(thumbs);
     main.appendChild(card);
 
-    main.appendChild(bulkUploadCard());
+    main.appendChild(extraPhotosCard());
 
     var i = state.cur.info;
     var kv = el('<div class="card"></div>');
