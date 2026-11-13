@@ -270,6 +270,10 @@
     });
   }
 
+  // Sellers hold INSERT on storage but not UPDATE, so an object can never be
+  // overwritten — a second POST to the same path fails as a duplicate. Every
+  // upload therefore needs its own path; see photoPath()/extraPath(), which
+  // give a retake a fresh name instead of trying to replace the original.
   function supaUpload(path, blob, contentType){
     return withRetry(function(){
       return fetch(SUPABASE_URL+"/storage/v1/object/catalog-uploads/"+path, {
@@ -284,6 +288,48 @@
         if(!res.ok) throw new Error("Upload failed: "+path);
         return path;
       });
+    });
+  }
+
+  // A shot's storage name. The first attempt keeps the plain, readable name;
+  // a retake gets a stamped one, because we cannot overwrite the first. The
+  // stamp lives on the lot, so the live sync and finalize always agree on
+  // the path even after a failure and retry.
+  function photoPath(lot, stepId){
+    var stamp = lot.retakeStamp && lot.retakeStamp[stepId];
+    return lot.remoteId+"/photo-"+stepId+(stamp ? "-r"+stamp : "")+".jpg";
+  }
+  function extraPath(lot, item){
+    return lot.remoteId+"/extra-"+item.id+".jpg";
+  }
+  // Re-recording a video hits the same wall as a retaken photo.
+  function videoPath(lot, name){
+    return lot.remoteId+"/video"+(lot.videoStamp ? "-r"+lot.videoStamp : "")+"."+safeExt(name, "mp4");
+  }
+
+  // Video needs its own uploader: files run to tens of megabytes, and fetch()
+  // cannot report upload progress. Without a visible bar, sellers assume a
+  // long upload has frozen and give up.
+  function uploadVideoWithProgress(path, file, contentType, onProgress){
+    return new Promise(function(resolve, reject){
+      var xhr = new XMLHttpRequest();
+      xhr.open("POST", SUPABASE_URL+"/storage/v1/object/catalog-uploads/"+path, true);
+      xhr.setRequestHeader("apikey", SUPABASE_ANON_KEY);
+      xhr.setRequestHeader("Authorization", "Bearer "+SUPABASE_ANON_KEY);
+      xhr.setRequestHeader("Content-Type", contentType || "video/mp4");
+      if(xhr.upload){
+        xhr.upload.onprogress = function(e){
+          if(e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+      }
+      xhr.onload = function(){
+        if(xhr.status >= 200 && xhr.status < 300) resolve(path);
+        else reject(new Error("Upload failed (" + xhr.status + ")"));
+      };
+      xhr.onerror   = function(){ reject(new Error("Lost connection")); };
+      xhr.onabort   = function(){ reject(new Error("Upload cancelled")); };
+      xhr.ontimeout = function(){ reject(new Error("Timed out")); };
+      try{ xhr.send(file); }catch(e){ reject(e); }
     });
   }
 
@@ -328,27 +374,61 @@
     });
   }
 
+  // Once the full-size image is safely on the server we only need enough of
+  // it to show a thumbnail. Holding 30+ full-resolution data URLs was pushing
+  // phones (iOS Safari especially) into memory pressure part-way through a
+  // session, after which every request started failing.
+  function shrinkDataUrl(dataUrl, maxDim, cb){
+    var done = false;
+    function finish(r){ if(!done){ done = true; cb(r); } }
+    var img = new Image();
+    img.onerror = function(){ finish(null); };
+    img.onload = function(){
+      try{
+        var w = img.width, h = img.height, scale = Math.min(1, maxDim / Math.max(w,h));
+        if(scale >= 1){ finish(null); return; }
+        var cw = Math.round(w*scale), ch = Math.round(h*scale);
+        var canvas = document.createElement("canvas");
+        canvas.width = cw; canvas.height = ch;
+        canvas.getContext("2d").drawImage(img, 0, 0, cw, ch);
+        finish(canvas.toDataURL("image/jpeg", 0.6));
+      }catch(e){ finish(null); }
+    };
+    try{ img.src = dataUrl; }catch(e){ finish(null); }
+  }
+
+  function releasePhotoMemory(lot, key, fullDataUrl, store){
+    shrinkDataUrl(fullDataUrl, 400, function(small){
+      // Only swap if the seller hasn't replaced this shot in the meantime.
+      if(small && store[key] === fullDataUrl) store[key] = small;
+    });
+  }
+
   function syncPhotoLive(lot, step, dataUrl){
     if(!supaReady()) return;
     ensureRemoteLot(lot).then(function(){
-      var path = lot.remoteId+"/photo-"+step.id+".jpg";
+      var path = photoPath(lot, step.id);
       return supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
         lot.uploadedPaths[step.id] = {stepId:step.id, title:step.title, path:path};
+        releasePhotoMemory(lot, step.id, dataUrl, lot.photos);
         var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
         return patchRemoteLot(lot, {photos:photoRefs});
       });
     }).catch(function(){ /* best-effort — anything missed here is caught at finalize */ });
   }
 
-  function syncExtraPhotoLive(lot, index){
-    if(!supaReady()) return;
-    var item = lot.extraPhotos[index];
-    if(!item) return;
-    var key = "extra-"+index;
+  // Extras carry their own permanent id rather than their position in the
+  // list. Position-based keys broke as soon as one was removed: every later
+  // photo shifted onto a path that already held a different image.
+  function syncExtraPhotoLive(lot, item){
+    if(!supaReady() || !item || !item.dataUrl) return;
+    var key = "extra-"+item.id;
     ensureRemoteLot(lot).then(function(){
-      var path = lot.remoteId+"/"+key+".jpg";
+      var path = extraPath(lot, item);
       return supaUpload(path, dataUrlToBlob(item.dataUrl), "image/jpeg").then(function(){
-        lot.uploadedPaths[key] = {stepId:key, title:"Uploaded photo "+(index+1), path:path};
+        var pos = lot.extraPhotos.indexOf(item);
+        lot.uploadedPaths[key] = {stepId:key, title:"Extra photo "+(pos>=0?pos+1:""), path:path};
+        releasePhotoMemory(lot, "dataUrl", item.dataUrl, item);
         var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
         return patchRemoteLot(lot, {photos:photoRefs});
       });
@@ -424,17 +504,39 @@
     }).catch(function(){});
   }
 
+  // Live upload state for the video, so the screen can show what's happening.
+  // {status:"uploading"|"done"|"failed", pct:0-100, msg:""}
+  var videoUp = null;
+
+  function repaintVideoScreen(){
+    if(state.screen === "video") render();
+  }
+
   function syncVideoLive(lot){
     if(!supaReady()) return;
     var v = lot.video;
     if(!v || !v.file) return;
+
+    videoUp = {status:"uploading", pct:0, msg:""};
+    repaintVideoScreen();
+
     ensureRemoteLot(lot).then(function(){
-      var vpath = lot.remoteId+"/video."+safeExt(v.name, "mp4");
-      return supaUpload(vpath, v.file, v.file.type || "video/mp4").then(function(){
+      var vpath = videoPath(lot, v.name);
+      return uploadVideoWithProgress(vpath, v.file, v.file.type || "video/mp4", function(pct){
+        if(videoUp && videoUp.status === "uploading" && pct !== videoUp.pct){
+          videoUp.pct = pct;
+          repaintVideoScreen();
+        }
+      }).then(function(){
         lot.videoUploaded = {name:v.name, size:v.size, path:vpath};
+        videoUp = {status:"done", pct:100, msg:""};
+        repaintVideoScreen();
         return patchRemoteLot(lot, {video:lot.videoUploaded});
       });
-    }).catch(function(){});
+    }).catch(function(err){
+      videoUp = {status:"failed", pct:0, msg:(err && err.message) ? err.message : "Upload failed"};
+      repaintVideoScreen();
+    });
   }
 
   function finalizeLot(lot, onProgress){
@@ -443,7 +545,7 @@
     var totalFiles = 0, doneFiles = 0;
 
     cat.steps.forEach(function(s){ if(lot.photos[s.id] && !lot.uploadedPaths[s.id]) totalFiles++; });
-    lot.extraPhotos.forEach(function(x, i2){ if(!lot.uploadedPaths["extra-"+i2]) totalFiles++; });
+    lot.extraPhotos.forEach(function(x){ if(x.dataUrl && !lot.uploadedPaths["extra-"+x.id]) totalFiles++; });
     lot.damage.forEach(function(d){ if(d.dataUrl && !lot.uploadedDamage[d.id]) totalFiles++; });
     if(lot.video && lot.video.file && !lot.videoUploaded) totalFiles++;
 
@@ -453,7 +555,7 @@
       cat.steps.forEach(function(s){
         var dataUrl = lot.photos[s.id];
         if(dataUrl && !lot.uploadedPaths[s.id]){
-          var path = lot.remoteId+"/photo-"+s.id+".jpg";
+          var path = photoPath(lot, s.id);
           uploads.push(
             supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
               lot.uploadedPaths[s.id] = {stepId:s.id, title:s.title, path:path};
@@ -464,12 +566,12 @@
       });
 
       lot.extraPhotos.forEach(function(x, i2){
-        var key = "extra-"+i2;
-        if(!lot.uploadedPaths[key]){
-          var path = lot.remoteId+"/"+key+".jpg";
+        var key = "extra-"+x.id;
+        if(!lot.uploadedPaths[key] && x.dataUrl){
+          var path = extraPath(lot, x);
           uploads.push(
             supaUpload(path, dataUrlToBlob(x.dataUrl), "image/jpeg").then(function(){
-              lot.uploadedPaths[key] = {stepId:key, title:"Uploaded photo "+(i2+1), path:path};
+              lot.uploadedPaths[key] = {stepId:key, title:"Extra photo "+(i2+1), path:path};
               bump();
             })
           );
@@ -490,7 +592,7 @@
 
       var videoRef = lot.video && lot.video.na ? {na:true} : lot.videoUploaded;
       if(lot.video && lot.video.file && !lot.videoUploaded){
-        var vpath = lot.remoteId+"/video."+safeExt(lot.video.name, "mp4");
+        var vpath = videoPath(lot, lot.video.name);
         uploads.push(
           supaUpload(vpath, lot.video.file, lot.video.file.type || "video/mp4").then(function(){
             videoRef = {name:lot.video.name, size:lot.video.size, path:vpath};
@@ -1426,7 +1528,10 @@
       attach:[], attachOther:"",
       ack:false,
       remoteId:null, remoteCreating:null, uploadedPaths:{}, videoUploaded:null,
-      extraPhotos:[], uploadedDamage:{}
+      extraPhotos:[], uploadedDamage:{},
+      // Storage objects cannot be overwritten, so a retake writes to a new
+      // path. These stamps keep that path stable across retries and resumes.
+      retakeStamp:{}, videoStamp:null
     };
   }
 
@@ -1446,6 +1551,14 @@
       if(pendingTarget.type === "step"){
         state.cur.photos[pendingTarget.id] = dataUrl;
         delete state.cur.naFlags[pendingTarget.id];
+        // A retake needs BOTH: a fresh storage path (the old object cannot be
+        // overwritten) and its uploadedPaths entry cleared, so that if the
+        // live upload below fails, finalize retries it instead of silently
+        // leaving the seller's first attempt as the final answer.
+        if(state.cur.uploadedPaths[pendingTarget.id]){
+          state.cur.retakeStamp[pendingTarget.id] = Date.now();
+          delete state.cur.uploadedPaths[pendingTarget.id];
+        }
         var cat = currentCategory();
         var step = cat && cat.steps.filter(function(s){ return s.id===pendingTarget.id; })[0];
         if(step) syncPhotoLive(state.cur, step, dataUrl);
@@ -1455,9 +1568,9 @@
       } else if(pendingTarget.type === "extra"){
         // Anything beyond the shot list — the seller knows their machine
         // better than our list does.
-        var ei = state.cur.extraPhotos.length;
-        state.cur.extraPhotos.push({dataUrl:dataUrl, name:"extra-"+(ei+1)});
-        syncExtraPhotoLive(state.cur, ei);
+        var xitem = {id:uuid(), dataUrl:dataUrl, name:"extra"};
+        state.cur.extraPhotos.push(xitem);
+        syncExtraPhotoLive(state.cur, xitem);
       }
       pendingTarget = null;
       render();
@@ -1500,9 +1613,9 @@
         return new Promise(function(resolve){
           resizeImage(f, 1400, function(dataUrl){
             if(dataUrl){
-              var idx = state.cur.extraPhotos.length;
-              state.cur.extraPhotos.push({dataUrl:dataUrl, name:f.name || ("photo-"+(idx+1))});
-              syncExtraPhotoLive(state.cur, idx);
+              var item = {id:uuid(), dataUrl:dataUrl, name:f.name || "photo"};
+              state.cur.extraPhotos.push(item);
+              syncExtraPhotoLive(state.cur, item);
             } else {
               bulkBusy.failed++;
             }
@@ -1557,6 +1670,9 @@
     var f = e.target.files[0];
     videoInput.value = "";
     if(!f) return;
+    // Replacing a video needs a fresh path for the same reason a retaken
+    // photo does — the previous object cannot be overwritten.
+    if(state.cur.videoUploaded) state.cur.videoStamp = Date.now();
     state.cur.video = {file:f, name:f.name || "video", size:f.size, url:URL.createObjectURL(f), na:false};
     state.cur.videoUploaded = null;
     render();
@@ -1637,6 +1753,8 @@
           uploadedPaths: c.uploadedPaths,
           uploadedDamage: c.uploadedDamage,
           videoUploaded: c.videoUploaded,
+          retakeStamp: c.retakeStamp,
+          videoStamp: c.videoStamp,
           videoNa: !!(c.video && c.video.na),
           damageNotes: (c.damage||[]).map(function(d){ return {id:d.id, note:d.note}; })
         }
@@ -1690,6 +1808,8 @@
     lot.uploadedPaths = snap.uploadedPaths || {};
     lot.uploadedDamage= snap.uploadedDamage || {};
     lot.videoUploaded = snap.videoUploaded || null;
+    lot.retakeStamp   = snap.retakeStamp || {};
+    lot.videoStamp    = snap.videoStamp || null;
     if(snap.videoNa) lot.video = {na:true};
     else if(snap.videoUploaded) lot.video = {name:snap.videoUploaded.name, size:snap.videoUploaded.size, restored:true};
     (snap.damageNotes||[]).forEach(function(d){
@@ -2137,18 +2257,14 @@
     return card;
   }
 
-  // Extra photos are keyed by position ("extra-0", "extra-1", ...), so
-  // dropping one in the middle would make every later key point at the wrong
-  // image. Rebuild the whole set of keys after a removal.
+  // Each extra owns a permanent id, so removing one just drops its own entry.
+  // Nothing shifts, and no other photo needs re-uploading.
   function removeExtraPhoto(index){
     var lot = state.cur;
+    var item = lot.extraPhotos[index];
+    if(!item) return;
     lot.extraPhotos.splice(index, 1);
-    Object.keys(lot.uploadedPaths).forEach(function(k){
-      if(k.indexOf("extra-") === 0) delete lot.uploadedPaths[k];
-    });
-    lot.extraPhotos.forEach(function(x, i2){
-      if(x.dataUrl) syncExtraPhotoLive(lot, i2);
-    });
+    delete lot.uploadedPaths["extra-"+item.id];
     if(supaReady()){
       var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
       patchRemoteLot(lot, {photos:photoRefs});
@@ -2208,6 +2324,7 @@
       var naBtn = el('<button class="btn ghost">'+(isNA?"Undo — No Video":"No Video For This Item")+'</button>');
       on(naBtn, "click", function(){
         state.cur.video = isNA ? null : {na:true};
+        videoUp = null;
         syncDetailsNow(state.cur);
         render();
       });
@@ -2215,6 +2332,41 @@
     }
     card.appendChild(btnrow);
     if(hasVideo) card.appendChild(el('<div class="tip">'+esc(video.name)+' — '+formatBytes(video.size)+'</div>'));
+
+    // Tell the seller exactly where the upload stands. A silent multi-minute
+    // upload is the main reason people think the video "didn't work".
+    if(videoUp && hasVideo){
+      if(videoUp.status === "uploading"){
+        var bar = el(
+          '<div style="margin-top:10px;">'+
+            '<div style="font-size:13px;margin-bottom:6px;">Sending your video — '+videoUp.pct+'%'+
+            '<br><span style="color:var(--steel);font-size:12px;">Keep this page open. Large videos can take a few minutes.</span></div>'+
+            '<div style="height:10px;background:var(--surface-2);border-radius:5px;overflow:hidden;">'+
+              '<div style="height:100%;width:'+videoUp.pct+'%;background:var(--accent);transition:width .25s;"></div>'+
+            '</div>'+
+          '</div>'
+        );
+        card.appendChild(bar);
+      } else if(videoUp.status === "done"){
+        card.appendChild(el('<div class="tip" style="color:var(--good);">✅ Video sent to Bright Star. You can keep going.</div>'));
+      } else if(videoUp.status === "failed"){
+        var fail = el('<div style="margin-top:10px;"></div>');
+        fail.appendChild(el('<div class="tip" style="color:var(--warn);">Video did not send — '+esc(videoUp.msg)+'. Your photos are not affected.</div>'));
+        var again = el('<button class="btn primary full" style="margin-top:8px;">Try Sending The Video Again</button>');
+        on(again, "click", function(){ syncVideoLive(state.cur); });
+        fail.appendChild(again);
+        var dropIt = el('<button class="btn ghost full" style="margin-top:8px;">Give Up On The Video — Submit Without It</button>');
+        on(dropIt, "click", function(){
+          state.cur.video = {na:true};
+          state.cur.videoUploaded = null;
+          videoUp = null;
+          syncDetailsNow(state.cur);
+          render();
+        });
+        fail.appendChild(dropIt);
+        card.appendChild(fail);
+      }
+    }
     main.appendChild(card);
 
     // Video never blocks. Sellers were photographing an entire machine and

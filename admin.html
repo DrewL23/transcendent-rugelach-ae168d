@@ -217,10 +217,30 @@
         btn.textContent = "Listing "+folderId.slice(0,8)+"...";
         return listStorageFolder(folderId).then(function(entries){
           var files = (entries||[]).filter(function(e){ return e.id; });
-          return files.reduce(function(p2, entry){
+          // If we happen to hold the lot, use its shot titles here too.
+          var known = null, folderLabel = folderId;
+          for(var li=0; li<state.lots.length; li++){
+            if(state.lots[li].id === folderId){ known = state.lots[li]; break; }
+          }
+          var titleByFile = {};
+          if(known){
+            folderLabel = niceFileName(lotDisplayName(known));
+            (known.photos||[]).forEach(function(p){
+              if(p.path) titleByFile[p.path.split("/").pop()] = p.title || p.stepId;
+            });
+            (known.damage||[]).forEach(function(d, di){
+              if(d.path) titleByFile[d.path.split("/").pop()] = "Issue - "+(d.note || (di+1));
+            });
+          }
+          var nameFor = zipFileNamer();
+          return files.reduce(function(p2, entry, idx){
             return p2.then(function(){
               return fetchAsBlob(folderId+"/"+entry.name).then(function(blob){
-                zip.file(folderId+"/"+entry.name, blob);
+                var title = titleByFile[entry.name];
+                var fileName = title
+                  ? nameFor(idx, title, entry.name)
+                  : entry.name;
+                zip.file(folderLabel+"/"+fileName, blob);
                 totalDone++; btn.textContent = "Zipping ("+totalDone+" files so far)...";
               });
             });
@@ -256,8 +276,33 @@
     }).catch(function(err){ alert(err.message); });
   }
 
-  function slugify(s){
-    return (s||"photo").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"") || "photo";
+  // Readable filename from a shot's own title ("Front-left corner"), rather
+  // than its storage name — which carries uuids and retake stamps nobody
+  // wants to look at in a folder.
+  function niceFileName(title){
+    var s = String(title == null ? "" : title).trim();
+    s = s.replace(/[\/\\:*?"<>|]/g, " ");   // characters Windows/macOS reject
+    s = s.replace(/[\u0000-\u001f]/g, "");  // control characters
+    s = s.replace(/\s+/g, " ").trim();
+    if(s.length > 70) s = s.slice(0, 70).trim();
+    return s || "Photo";
+  }
+
+  // Keeps the shot order readable in a folder listing and guarantees no two
+  // files collide, even when titles repeat.
+  function zipFileNamer(){
+    var used = {};
+    return function(index, title, path){
+      var ext = (String(path||"").split(".").pop() || "jpg").toLowerCase();
+      if(ext.length > 5) ext = "jpg";
+      var n = index + 1;
+      var num = (n < 10 ? "0" : "") + n;
+      var base = num + " " + niceFileName(title);
+      var name = base, k = 2;
+      while(used[name.toLowerCase()]){ name = base + " (" + k + ")"; k++; }
+      used[name.toLowerCase()] = true;
+      return name + "." + ext;
+    };
   }
 
   function blobToDataUrl(blob){
@@ -328,7 +373,11 @@
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a");
       a.href = url;
-      a.download = slugify((info.make||"lot")+"-"+(info.model||""))+"-submission.html";
+      a.download = niceFileName(
+        [info.year, info.make, info.model].filter(function(x){
+          return String(x||"").trim().length > 1;
+        }).join(" ") || lotDisplayName(lot)
+      )+" - submission.html";
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
       btn.disabled = false; btn.textContent = origText;
@@ -348,13 +397,12 @@
     btn.disabled = true;
     var zip = new JSZip();
     var done = 0;
+    var nameFor = zipFileNamer();
 
     var chain = items.reduce(function(prev, item, idx){
       return prev.then(function(){
         return fetchAsBlob(item.path).then(function(blob){
-          var ext = (item.path.split(".").pop() || "jpg");
-          var num = (idx+1<10 ? "0" : "")+(idx+1);
-          zip.file(num+"-"+slugify(item.name)+"."+ext, blob);
+          zip.file(nameFor(idx, item.name, item.path), blob);
           done++; btn.textContent = "Zipping "+done+"/"+items.length+"...";
         });
       });
@@ -368,7 +416,11 @@
       var a = document.createElement("a");
       var info = lot.info || {};
       a.href = url;
-      a.download = slugify((info.make||"lot")+"-"+(info.model||""))+"-photos.zip";
+      a.download = niceFileName(
+        [info.year, info.make, info.model].filter(function(x){
+          return String(x||"").trim().length > 1;
+        }).join(" ") || lotDisplayName(lot)
+      )+" - photos.zip";
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       URL.revokeObjectURL(url);
       btn.disabled = false; btn.textContent = origText;
@@ -835,7 +887,7 @@
       fetchAsBlob(lot.video.path).then(function(blob){ vtag.src = URL.createObjectURL(blob); });
       vidCard.appendChild(vtag);
       var dlBtn = el('<button class="btn" style="margin-top:10px;">Download Video</button>');
-      on(dlBtn, "click", function(){ downloadFile(lot.video.path, (info.make||"lot")+"-"+(info.model||"")+"-video."+(lot.video.path.split(".").pop())); });
+      on(dlBtn, "click", function(){ downloadFile(lot.video.path, niceFileName(lotDisplayName(lot)+" - operating video")+"."+(lot.video.path.split(".").pop()||"mp4")); });
       vidCard.appendChild(dlBtn);
       app.appendChild(vidCard);
     } else if(lot.video && lot.video.na){
@@ -854,7 +906,7 @@
       var img = el('<img loading="lazy">');
       fetchAsBlob(p.path).then(function(blob){ img.src = URL.createObjectURL(blob); });
       link.insertBefore(img, link.firstChild);
-      on(link, "click", function(){ downloadFile(p.path, (p.stepId||"photo")+".jpg"); });
+      on(link, "click", function(){ downloadFile(p.path, niceFileName(p.title || p.stepId)+"."+((p.path.split(".").pop()||"jpg"))); });
       grid.appendChild(link);
     });
     var noteOnlyIssues = [];
@@ -864,7 +916,7 @@
       var img = el('<img loading="lazy">');
       fetchAsBlob(d.path).then(function(blob){ img.src = URL.createObjectURL(blob); }).catch(function(){});
       link.insertBefore(img, link.firstChild);
-      on(link, "click", function(){ downloadFile(d.path, "damage-"+i2+".jpg"); });
+      on(link, "click", function(){ downloadFile(d.path, niceFileName("Issue - "+(d.note || (i2+1)))+".jpg"); });
       grid.appendChild(link);
     });
     photosCard.appendChild(grid);
