@@ -187,17 +187,22 @@
     position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.55); color:#fff;
     font-size:9.5px; padding:3px 5px; line-height:1.2;
   }
+  .sendstate{margin-top:8px; font-size:12.5px; font-weight:600; color:var(--steel);}
+  .sendstate.good{color:var(--good);}
+  .sendstate.bad{color:var(--warn);}
   .shotjump{display:grid; grid-template-columns:repeat(8,1fr); gap:6px; margin-top:10px;}
   .shotjump button{aspect-ratio:1; border-radius:6px; border:1px solid var(--line);
     background:var(--surface-2); color:var(--steel); font-size:13px; font-weight:700;
     cursor:pointer; padding:0;}
   .shotjump button.done{background:var(--good); border-color:var(--good); color:#fff;}
   .shotjump button.na{background:var(--steel-soft); border-color:var(--steel-soft); color:var(--ink);}
+  .shotjump button.bad{background:var(--warn); border-color:var(--warn); color:#fff;}
   .shotjump button.here{outline:3px solid var(--accent); outline-offset:1px;}
   .jumpkey{display:inline-block; width:11px; height:11px; border-radius:3px; vertical-align:-1px;
     border:1px solid var(--line); background:var(--surface-2);}
   .jumpkey.done{background:var(--good); border-color:var(--good);}
   .jumpkey.na{background:var(--steel-soft); border-color:var(--steel-soft);}
+  .jumpkey.bad{background:var(--warn); border-color:var(--warn);}
   .rmthumb{position:absolute; top:3px; right:3px; width:22px; height:22px; line-height:20px;
     border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:15px;
     cursor:pointer; padding:0; text-align:center;}
@@ -415,17 +420,64 @@
     });
   }
 
+  // A failed upload used to vanish without trace: the seller saw the photo on
+  // screen and assumed it was with us, and nothing told them otherwise until
+  // they submitted — if they ever did. Failures are now recorded and shown.
+  function markUnsent(lot, step, dataUrl){
+    lot.unsent[step.id] = {title:step.title, dataUrl:dataUrl};
+    if(state.screen === "photos" || state.screen === "review") render();
+  }
+
   function syncPhotoLive(lot, step, dataUrl){
     if(!supaReady()) return;
     ensureRemoteLot(lot).then(function(){
       var path = photoPath(lot, step.id);
       return supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
         lot.uploadedPaths[step.id] = {stepId:step.id, title:step.title, path:path};
+        delete lot.unsent[step.id];
         releasePhotoMemory(lot, step.id, dataUrl, lot.photos);
         var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
         return patchRemoteLot(lot, {photos:photoRefs});
+      }).then(function(){
+        if(state.screen === "photos" || state.screen === "review") render();
       });
-    }).catch(function(){ /* best-effort — anything missed here is caught at finalize */ });
+    }).catch(function(){
+      markUnsent(lot, step, dataUrl);
+    });
+  }
+
+  function unsentCount(lot){
+    return Object.keys(lot.unsent || {}).length;
+  }
+
+  // Re-attempt everything that has not reached us. Used by the warning banner.
+  function retryUnsent(lot, btn){
+    var ids = Object.keys(lot.unsent || {});
+    if(!ids.length) return;
+    var cat = CATEGORIES[lot.category];
+    if(btn){ btn.disabled = true; btn.textContent = "Sending..."; }
+    var chain = Promise.resolve();
+    ids.forEach(function(id){
+      chain = chain.then(function(){
+        var step = cat && cat.steps.filter(function(s){ return s.id === id; })[0];
+        var data = lot.unsent[id] && lot.unsent[id].dataUrl;
+        if(!step || !data) { delete lot.unsent[id]; return; }
+        var path = photoPath(lot, id);
+        return supaUpload(path, dataUrlToBlob(data), "image/jpeg").then(function(){
+          lot.uploadedPaths[id] = {stepId:id, title:step.title, path:path};
+          delete lot.unsent[id];
+          releasePhotoMemory(lot, id, data, lot.photos);
+        }).catch(function(){ /* leave it flagged */ });
+      });
+    });
+    chain.then(function(){
+      var refs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
+      return patchRemoteLot(lot, {photos:refs}).catch(function(){});
+    }).then(function(){
+      var left = unsentCount(lot);
+      render();
+      if(left) alert(left+" photo"+(left===1?"":"s")+" still could not be sent.\n\nMove somewhere with better signal and tap it again. Your photos are safe on this phone in the meantime.");
+    });
   }
 
   // Extras carry their own permanent id rather than their position in the
@@ -1542,7 +1594,10 @@
       extraPhotos:[], uploadedDamage:{},
       // Storage objects cannot be overwritten, so a retake writes to a new
       // path. These stamps keep that path stable across retries and resumes.
-      retakeStamp:{}, videoStamp:null
+      retakeStamp:{}, videoStamp:null,
+      // Shots that failed to upload, so we can show and retry them rather
+      // than letting the seller believe everything arrived.
+      unsent:{}
     };
   }
 
@@ -1935,7 +1990,10 @@
     if(state.screen !== "welcome"){
       top.appendChild(el(
         '<div class="helprow">Questions? <a href="tel:'+esc(HELP_TEL)+'">Call '+esc(HELP_PHONE)+'</a>'+
-        '<span style="float:right;opacity:.8;">Saved automatically</span></div>'
+        '<span style="float:right;'+(unsentCount(state.cur) ? 'color:var(--warn);font-weight:700;' : 'opacity:.8;')+'">'+
+        (unsentCount(state.cur)
+          ? '⚠️ '+unsentCount(state.cur)+' not sent'
+          : 'Saved automatically')+'</span></div>'
       ));
     }
     root.appendChild(top);
@@ -2185,25 +2243,47 @@
     card.appendChild(el('<div class="qhint">Tap any one to jump straight to it — handy if an earlier photo came out blurry.</div>'));
     var grid = el('<div class="shotjump"></div>');
     cat.steps.forEach(function(s, idx){
-      var done = !!state.cur.photos[s.id] || !!state.cur.uploadedPaths[s.id];
+      var sent = !!state.cur.uploadedPaths[s.id];
+      var failed = !!state.cur.unsent[s.id];
       var na = !!state.cur.naFlags[s.id];
-      var cls = idx === state.photoIndex ? "here" : (done ? "done" : (na ? "na" : ""));
+      var cls = failed ? "bad" : (sent ? "done" : (na ? "na" : ""));
+      if(idx === state.photoIndex) cls += " here";
       var b = el('<button class="'+cls+'" title="'+esc(s.title)+'">'+(idx+1)+'</button>');
       on(b, "click", function(){ state.photoIndex = idx; render(); window.scrollTo(0,0); });
       grid.appendChild(b);
     });
     card.appendChild(grid);
     card.appendChild(el('<div class="qhint" style="margin-top:8px;">'+
-      '<span class="jumpkey done"></span> taken &nbsp; '+
+      '<span class="jumpkey done"></span> saved with us &nbsp; '+
+      '<span class="jumpkey bad"></span> not sent &nbsp; '+
       '<span class="jumpkey na"></span> not applicable &nbsp; '+
       '<span class="jumpkey"></span> still to do</div>'));
     return card;
+  }
+
+  // Shown wherever a seller might otherwise walk away believing their photos
+  // are with us when they are not.
+  function unsentBanner(){
+    var n = unsentCount(state.cur);
+    if(!n) return null;
+    var box = el('<div class="callout" style="border-color:var(--warn);"></div>');
+    box.appendChild(el('<h3>⚠️ '+n+' photo'+(n===1?'':'s')+' haven’t reached us</h3>'));
+    box.appendChild(el('<p style="margin:6px 0 0;font-size:13.5px;line-height:1.6;">'+
+      'They are saved on this phone but could not be sent — usually a weak signal. '+
+      '<b>Don’t close this page yet.</b> Move somewhere with better service and tap below.</p>'));
+    var b = el('<button class="btn primary full" style="margin-top:10px;">Send Them Now</button>');
+    on(b, "click", function(){ retryUnsent(state.cur, b); });
+    box.appendChild(b);
+    box.appendChild(el('<div class="qhint" style="margin-top:8px;">Still stuck? Call '+esc(HELP_PHONE)+' and we will sort it out with you.</div>'));
+    return box;
   }
 
   function renderPhotos(main, app){
     var cat = currentCategory();
     var step = cat.steps[state.photoIndex];
     screenHeader(main, stepLabel("photos")+" — Photo "+(state.photoIndex+1)+" of "+cat.steps.length, step.title, step.instr);
+    var ub = unsentBanner();
+    if(ub) main.appendChild(ub);
 
     var card = el('<div class="card photostep"></div>');
     var meta = el('<div class="stepmeta"><span class="stepcount">SHOT '+(state.photoIndex+1)+' / '+cat.steps.length+'</span>'+
@@ -2227,6 +2307,15 @@
       frame.appendChild(el('<div class="placeholder">No photo yet — take one below, or pick it from your gallery</div>'));
     }
     card.appendChild(frame);
+
+    // Say plainly whether this shot is with us yet.
+    if(state.cur.unsent[step.id]){
+      card.appendChild(el('<div class="sendstate bad">⚠️ Not sent yet — this one is still only on your phone.</div>'));
+    } else if(state.cur.uploadedPaths[step.id]){
+      card.appendChild(el('<div class="sendstate good">✅ Saved to Bright Star</div>'));
+    } else if(photo){
+      card.appendChild(el('<div class="sendstate">Sending…</div>'));
+    }
 
     card.appendChild(el('<div class="rotatebanner">📱 Turn your phone to the side and take photos from the side to get the full width of the picture.</div>'));
 
@@ -2731,6 +2820,8 @@
     var cat = currentCategory();
     screenHeader(main, stepLabel("review"), "Review this lot",
       "Check every shot before saving. Missing required photos are flagged below.");
+    var rub = unsentBanner();
+    if(rub) main.appendChild(rub);
 
     var missing = missingPhotoCount();
     var bulkCount = state.cur.extraPhotos.length;
