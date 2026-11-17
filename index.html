@@ -1518,7 +1518,7 @@
     return {
       category:null,
       equipType:null,
-      info:{seller:"", make:"", model:"", year:"", serial:"", meter:"", location:"", cutCapacity:""},
+      info:{seller:"", phone:"", make:"", model:"", year:"", serial:"", meter:"", location:"", cutCapacity:""},
       specs:{},
       story:{owners:"", maintenance:"", updates:"", other:""},
       photos:{}, naFlags:{},
@@ -2100,8 +2100,23 @@
       '</div>'
     ));
 
-    var card = el('<div class="card"></div>');
     var i = state.cur.info;
+
+    // Contact details come FIRST. Most abandoned sessions stop before any
+    // field is filled, and when that happens with these at the bottom of the
+    // form we are left with no way to reach the person at all.
+    var who = el('<div class="card"></div>');
+    who.appendChild(el('<span class="qlabel">Who are we working with?</span>'));
+    who.appendChild(el('<div class="qhint">So we can help if you get stuck, and so we can '+
+      '<b>text you a link back to this</b> if you have to stop partway through. '+
+      'Nothing here is required, but the phone number is the one we would really like.</div>'));
+    var whoGrid = el('<div class="grid2"></div>');
+    whoGrid.appendChild(fieldRow("Your name", null, i.seller, function(v){ i.seller=v; }, {placeholder:"Dale Nissley"}));
+    whoGrid.appendChild(fieldRow("Your phone number", null, i.phone, function(v){ i.phone=v; }, {placeholder:"574-555-0199", type:"tel"}));
+    who.appendChild(whoGrid);
+    main.appendChild(who);
+
+    var card = el('<div class="card"></div>');
     var grid = el('<div class="grid2"></div>');
     grid.appendChild(fieldRow("Make", null, i.make, function(v){ i.make=v; }, {placeholder:"John Deere"}));
     grid.appendChild(fieldRow("Model", null, i.model, function(v){ i.model=v; }, {placeholder:"310SL"}));
@@ -2113,7 +2128,6 @@
       card.appendChild(fieldRow("Cut capacity", "max log diameter or board width it handles", i.cutCapacity, function(v){ i.cutCapacity=v; }, {placeholder:"36 in"}));
     }
     card.appendChild(fieldRow("Where is it located?", "city/county is fine", i.location, function(v){ i.location=v; }, {placeholder:"Salina, KS"}));
-    card.appendChild(fieldRow("Your name", "so we can reach you with questions", i.seller, function(v){ i.seller=v; }));
     main.appendChild(card);
     renderFooter(app,
       function(){ state.screen="category"; render(); },

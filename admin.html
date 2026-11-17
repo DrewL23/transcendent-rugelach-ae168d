@@ -635,6 +635,37 @@
       return;
     }
 
+    // Everyone who started and stopped, worth most first — a seller who shot
+    // 30 photos and never pressed Submit is a far better call than one who
+    // opened the app and put it down.
+    var stalled = state.lots.filter(function(l){ return l.status === "in_progress"; })
+      .sort(function(a,b){ return (b.photos||[]).length - (a.photos||[]).length; });
+    if(stalled.length){
+      var fc = el('<div class="card" style="border-color:var(--accent);"></div>');
+      fc.appendChild(el('<span class="qlabel">Needs a follow-up call ('+stalled.length+')</span>'));
+      fc.appendChild(el('<div class="qhint">Started but never submitted. Everything they did send is already saved — '+
+        'open one to copy a link that drops them back exactly where they stopped.</div>'));
+      stalled.forEach(function(l){
+        var li = l.info || {};
+        var n = (l.photos||[]).length;
+        var contact = [];
+        if(li.seller) contact.push(esc(li.seller));
+        if(li.phone) contact.push('<a href="tel:'+esc(String(li.phone).replace(/[^0-9+]/g,""))+'" style="color:var(--accent);font-weight:700;">'+esc(li.phone)+'</a>');
+        if(li.location) contact.push(esc(li.location));
+        var who = contact.length ? contact.join(" · ") : '<span style="color:var(--warn);">no contact details given</span>';
+        var row = el(
+          '<div class="lotchip" style="cursor:pointer;">'+
+            '<div><div class="nm">'+esc(lotDisplayName(l))+'</div>'+
+            '<div class="meta">'+who+'</div></div>'+
+            '<span class="pill '+(n ? 'good' : 'warn')+'">'+(n ? n+' photo'+(n===1?'':'s') : 'nothing yet')+'</span>'+
+          '</div>'
+        );
+        on(row, "click", function(){ state.current = l; state.screen = "detail"; render(); });
+        fc.appendChild(row);
+      });
+      app.appendChild(fc);
+    }
+
     state.lots.forEach(function(lot){
       var info = lot.info || {};
       var photoCount = (lot.photos||[]).length;
@@ -819,6 +850,9 @@
       (info.cutCapacity ? '<dt>Cut capacity</dt><dd>'+esc(info.cutCapacity)+'</dd>' : '')+
       '<dt>Location</dt><dd>'+esc(info.location||"—")+'</dd>'+
       '<dt>Seller</dt><dd>'+esc(info.seller||"—")+'</dd>'+
+      '<dt>Phone</dt><dd>'+(info.phone
+        ? '<a href="tel:'+esc(String(info.phone).replace(/[^0-9+]/g,""))+'" style="color:var(--accent);font-weight:700;">'+esc(info.phone)+'</a>'
+        : '—')+'</dd>'+
       (info.acknowledged
         ? '<dt>Accuracy statement</dt><dd>Accepted on submit'+
           (info.acknowledgedAt ? ' — '+esc(new Date(info.acknowledgedAt).toLocaleString()) : '')+'</dd>'
