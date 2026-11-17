@@ -187,6 +187,17 @@
     position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.55); color:#fff;
     font-size:9.5px; padding:3px 5px; line-height:1.2;
   }
+  .shotjump{display:grid; grid-template-columns:repeat(8,1fr); gap:6px; margin-top:10px;}
+  .shotjump button{aspect-ratio:1; border-radius:6px; border:1px solid var(--line);
+    background:var(--surface-2); color:var(--steel); font-size:13px; font-weight:700;
+    cursor:pointer; padding:0;}
+  .shotjump button.done{background:var(--good); border-color:var(--good); color:#fff;}
+  .shotjump button.na{background:var(--steel-soft); border-color:var(--steel-soft); color:var(--ink);}
+  .shotjump button.here{outline:3px solid var(--accent); outline-offset:1px;}
+  .jumpkey{display:inline-block; width:11px; height:11px; border-radius:3px; vertical-align:-1px;
+    border:1px solid var(--line); background:var(--surface-2);}
+  .jumpkey.done{background:var(--good); border-color:var(--good);}
+  .jumpkey.na{background:var(--steel-soft); border-color:var(--steel-soft);}
   .rmthumb{position:absolute; top:3px; right:3px; width:22px; height:22px; line-height:20px;
     border-radius:50%; border:none; background:rgba(0,0,0,.6); color:#fff; font-size:15px;
     cursor:pointer; padding:0; text-align:center;}
@@ -1549,13 +1560,18 @@
         return;
       }
       if(pendingTarget.type === "step"){
+        // Check for a previous attempt BEFORE overwriting it, or every first
+        // photo looks like a retake.
+        var hadBefore = !!state.cur.uploadedPaths[pendingTarget.id] || !!state.cur.photos[pendingTarget.id];
         state.cur.photos[pendingTarget.id] = dataUrl;
         delete state.cur.naFlags[pendingTarget.id];
         // A retake needs BOTH: a fresh storage path (the old object cannot be
         // overwritten) and its uploadedPaths entry cleared, so that if the
         // live upload below fails, finalize retries it instead of silently
-        // leaving the seller's first attempt as the final answer.
-        if(state.cur.uploadedPaths[pendingTarget.id]){
+        // leaving the seller's first attempt as the final answer. The bump
+        // covers any replacement, because an earlier attempt may have reached
+        // storage even if we never recorded it.
+        if(hadBefore){
           state.cur.retakeStamp[pendingTarget.id] = Date.now();
           delete state.cur.uploadedPaths[pendingTarget.id];
         }
@@ -2141,6 +2157,49 @@
     );
   }
 
+  // Clears a shot completely — the local copy, the "already sent" marker and
+  // the server's reference to it. The stored file itself is left behind
+  // (sellers cannot delete from storage), but nothing points at it any more,
+  // so it never reaches a listing.
+  function removeStepPhoto(stepId){
+    var lot = state.cur;
+    delete lot.photos[stepId];
+    delete lot.naFlags[stepId];
+    delete lot.uploadedPaths[stepId];
+    // Next photo for this shot must not reuse the old path.
+    lot.retakeStamp[stepId] = Date.now();
+    if(supaReady()){
+      var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
+      ensureRemoteLot(lot).then(function(){
+        return patchRemoteLot(lot, {photos:photoRefs});
+      }).catch(function(){});
+    }
+    render();
+  }
+
+  // Jumping straight to the blurry one. Stepping back through twenty shots
+  // to fix number seven is the kind of thing that makes people give up.
+  function shotJumpCard(cat){
+    var card = el('<div class="card"></div>');
+    card.appendChild(el('<span class="qlabel">All '+cat.steps.length+' shots</span>'));
+    card.appendChild(el('<div class="qhint">Tap any one to jump straight to it — handy if an earlier photo came out blurry.</div>'));
+    var grid = el('<div class="shotjump"></div>');
+    cat.steps.forEach(function(s, idx){
+      var done = !!state.cur.photos[s.id] || !!state.cur.uploadedPaths[s.id];
+      var na = !!state.cur.naFlags[s.id];
+      var cls = idx === state.photoIndex ? "here" : (done ? "done" : (na ? "na" : ""));
+      var b = el('<button class="'+cls+'" title="'+esc(s.title)+'">'+(idx+1)+'</button>');
+      on(b, "click", function(){ state.photoIndex = idx; render(); window.scrollTo(0,0); });
+      grid.appendChild(b);
+    });
+    card.appendChild(grid);
+    card.appendChild(el('<div class="qhint" style="margin-top:8px;">'+
+      '<span class="jumpkey done"></span> taken &nbsp; '+
+      '<span class="jumpkey na"></span> not applicable &nbsp; '+
+      '<span class="jumpkey"></span> still to do</div>'));
+    return card;
+  }
+
   function renderPhotos(main, app){
     var cat = currentCategory();
     var step = cat.steps[state.photoIndex];
@@ -2178,7 +2237,7 @@
     var galBtn = el('<button class="btn">Choose from Gallery</button>');
     on(galBtn, "click", function(){ openGallery({type:"step", id:step.id}); });
     btnrow.appendChild(galBtn);
-    if(step.naAllowed && !photo){
+    if(step.naAllowed && !photo && !alreadySent){
       var naBtn = el('<button class="btn ghost">'+(isNA?"Undo — Not Applicable":"Not Applicable")+'</button>');
       on(naBtn, "click", function(){
         if(isNA) delete state.cur.naFlags[step.id]; else state.cur.naFlags[step.id]=true;
@@ -2187,8 +2246,22 @@
       btnrow.appendChild(naBtn);
     }
     card.appendChild(btnrow);
+
+    // Taking a replacement is the usual fix for a bad shot, but sometimes a
+    // seller just wants it gone — e.g. they photographed the wrong machine.
+    if(photo || alreadySent){
+      var delBtn = el('<button class="btn ghost full" style="margin-top:8px;">Delete This Photo</button>');
+      on(delBtn, "click", function(){
+        if(!confirm("Delete this photo?\n\nIt will be removed from your submission. You can take a new one straight after.")) return;
+        removeStepPhoto(step.id);
+      });
+      card.appendChild(delBtn);
+    }
+
     if(step.tip) card.appendChild(el('<div class="tip">'+esc(step.tip)+'</div>'));
     main.appendChild(card);
+
+    main.appendChild(shotJumpCard(cat));
 
     main.appendChild(extraPhotosCard());
 
@@ -2680,6 +2753,15 @@
       else if(state.cur.uploadedPaths[s.id]){ t = el('<div class="t"><span class="lbl">✅ '+esc(s.title)+' — sent</span></div>'); }
       else { t = el('<div class="t missing"><span>'+esc(s.title)+' missing</span></div>'); }
       on(t, "click", function(){ state.photoIndex = cat.steps.indexOf(s); state.screen="photos"; render(); });
+      if(photo || state.cur.uploadedPaths[s.id]){
+        var rmShot = el('<button class="rmthumb" title="Delete this photo">×</button>');
+        on(rmShot, "click", function(ev){
+          ev.stopPropagation();
+          if(!confirm("Delete the “"+s.title+"” photo?\n\nYou can retake it afterwards.")) return;
+          removeStepPhoto(s.id);
+        });
+        t.appendChild(rmShot);
+      }
       thumbs.appendChild(t);
     });
     card.appendChild(thumbs);
