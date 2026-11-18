@@ -420,6 +420,81 @@
     });
   }
 
+  // -------------------------------------------------------------------------
+  // Thumbnail keepsafe.
+  //
+  // Sellers cannot read their photos back from storage — that is deliberate,
+  // the bucket is admin-only. So once a session resumed (which now happens on
+  // any reload, and phones reload constantly) every photo they had taken
+  // turned into a line of text. They could not see their own work.
+  //
+  // We keep a small copy of each uploaded shot on their device purely so the
+  // app can show it back to them. Full-size images stay on the server.
+  // -------------------------------------------------------------------------
+  var THUMBS_KEY = "bsa_catalog_thumbs_v1";
+  var thumbCache = null;
+
+  function thumbsLoad(){
+    if(thumbCache) return thumbCache;
+    try{ thumbCache = JSON.parse(localStorage.getItem(THUMBS_KEY) || "{}"); }
+    catch(e){ thumbCache = {}; }
+    return thumbCache;
+  }
+  function thumbsSave(){
+    try{ localStorage.setItem(THUMBS_KEY, JSON.stringify(thumbCache || {})); }
+    catch(e){
+      // Out of room. Showing thumbnails is a nicety — never let it break the
+      // session, so drop the store and carry on without them.
+      thumbCache = {};
+      try{ localStorage.removeItem(THUMBS_KEY); }catch(e2){}
+    }
+  }
+  function thumbKey(lot, key){ return (lot.remoteId || "local") + "|" + key; }
+
+  function putThumb(lot, key, dataUrl){
+    shrinkDataUrl(dataUrl, 320, function(small){
+      var t = thumbsLoad();
+      t[thumbKey(lot, key)] = small || dataUrl;
+      thumbsSave();
+    });
+  }
+  function getThumb(lot, key){
+    return thumbsLoad()[thumbKey(lot, key)] || null;
+  }
+  function dropThumb(lot, key){
+    var t = thumbsLoad(), k = thumbKey(lot, key);
+    if(t[k]){ delete t[k]; thumbsSave(); }
+  }
+  function clearThumbs(lot){
+    var t = thumbsLoad(), pre = (lot.remoteId || "local") + "|", touched = false;
+    Object.keys(t).forEach(function(k){
+      if(k.indexOf(pre) === 0){ delete t[k]; touched = true; }
+    });
+    if(touched) thumbsSave();
+  }
+
+  // Put the seller's pictures back in front of them after a resume. Only for
+  // shots the server already holds — anything unsent genuinely needs retaking,
+  // and showing a thumbnail for it would be a lie.
+  function restoreThumbs(lot){
+    var cat = CATEGORIES[lot.category];
+    if(cat){
+      cat.steps.forEach(function(s){
+        if(lot.uploadedPaths[s.id] && !lot.photos[s.id]){
+          var th = getThumb(lot, s.id);
+          if(th) lot.photos[s.id] = th;
+        }
+      });
+    }
+    Object.keys(lot.uploadedPaths).forEach(function(k){
+      if(k.indexOf("extra-") !== 0) return;
+      var id = k.slice(6);
+      var already = lot.extraPhotos.filter(function(x){ return x.id === id; })[0];
+      if(already) return;
+      lot.extraPhotos.push({id:id, dataUrl:getThumb(lot, k), name:"extra", restored:true});
+    });
+  }
+
   // A failed upload used to vanish without trace: the seller saw the photo on
   // screen and assumed it was with us, and nothing told them otherwise until
   // they submitted — if they ever did. Failures are now recorded and shown.
@@ -435,6 +510,7 @@
       return supaUpload(path, dataUrlToBlob(dataUrl), "image/jpeg").then(function(){
         lot.uploadedPaths[step.id] = {stepId:step.id, title:step.title, path:path};
         delete lot.unsent[step.id];
+        putThumb(lot, step.id, dataUrl);
         releasePhotoMemory(lot, step.id, dataUrl, lot.photos);
         var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
         return patchRemoteLot(lot, {photos:photoRefs});
@@ -491,6 +567,7 @@
       return supaUpload(path, dataUrlToBlob(item.dataUrl), "image/jpeg").then(function(){
         var pos = lot.extraPhotos.indexOf(item);
         lot.uploadedPaths[key] = {stepId:key, title:"Extra photo "+(pos>=0?pos+1:""), path:path};
+        putThumb(lot, key, item.dataUrl);
         releasePhotoMemory(lot, "dataUrl", item.dataUrl, item);
         var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
         return patchRemoteLot(lot, {photos:photoRefs});
@@ -1887,6 +1964,8 @@
       lot.damage.push({id:d.id, note:d.note||"", dataUrl:null});
     });
     lot.resumed = true;
+    // Put their own pictures back on screen instead of a wall of "already sent".
+    restoreThumbs(lot);
     return lot;
   }
 
@@ -2224,6 +2303,7 @@
     delete lot.photos[stepId];
     delete lot.naFlags[stepId];
     delete lot.uploadedPaths[stepId];
+    dropThumb(lot, stepId);
     // Next photo for this shot must not reuse the old path.
     lot.retakeStamp[stepId] = Date.now();
     if(supaReady()){
@@ -2441,6 +2521,7 @@
     if(!item) return;
     lot.extraPhotos.splice(index, 1);
     delete lot.uploadedPaths["extra-"+item.id];
+    dropThumb(lot, "extra-"+item.id);
     if(supaReady()){
       var photoRefs = Object.keys(lot.uploadedPaths).map(function(k){ return lot.uploadedPaths[k]; });
       patchRemoteLot(lot, {photos:photoRefs});
@@ -3005,7 +3086,7 @@
     state.lots.push(state.cur);
     // Only forget the saved session once it is actually off the device.
     // A failed submit keeps it, so they can close the app and still resume.
-    if(state.cur.uploaded) clearSession();
+    if(state.cur.uploaded){ clearSession(); clearThumbs(state.cur); }
     state.screen = "lotSaved";
     render();
   }
