@@ -246,6 +246,9 @@
   var EMAIL_TO = "drewl@brightstarauctions.com"; // change to your cataloging intake address
   var HELP_PHONE = "574-336-5803";               // shown to sellers throughout the app
   var HELP_TEL   = "+15743365803";               // tel: form, so a phone dials on tap
+  // Supabase rejects anything over 50 MB (verified: 10 MB ok, 55 MB -> 413).
+  // Stop a little short of it so a slow connection doesn't fail at the line.
+  var VIDEO_MAX_BYTES = 45 * 1024 * 1024;
 
   var SUPABASE_URL = "https://johrcgvbpwmlyhepckyo.supabase.co";
   var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpvaHJjZ3ZicHdtbHloZXBja3lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU4MTcwNTEsImV4cCI6MjEwMTM5MzA1MX0.4dPLdUYNuFP9zDflQCYJ62YtK-yFXI0UDBF2VKr6y8g";
@@ -687,7 +690,7 @@
     cat.steps.forEach(function(s){ if(lot.photos[s.id] && !lot.uploadedPaths[s.id]) totalFiles++; });
     lot.extraPhotos.forEach(function(x){ if(x.dataUrl && !lot.uploadedPaths["extra-"+x.id]) totalFiles++; });
     lot.damage.forEach(function(d){ if(d.dataUrl && !lot.uploadedDamage[d.id]) totalFiles++; });
-    if(lot.video && lot.video.file && !lot.videoUploaded) totalFiles++;
+    if(lot.video && lot.video.file && !lot.videoUploaded && lot.video.size <= VIDEO_MAX_BYTES) totalFiles++;
 
     function bump(){ doneFiles++; if(onProgress) onProgress(doneFiles, totalFiles); }
 
@@ -731,7 +734,9 @@
       });
 
       var videoRef = lot.video && lot.video.na ? {na:true} : lot.videoUploaded;
-      if(lot.video && lot.video.file && !lot.videoUploaded){
+      // An oversized video will only be rejected again, and submitting the
+      // lot must not stall on it.
+      if(lot.video && lot.video.file && !lot.videoUploaded && lot.video.size <= VIDEO_MAX_BYTES){
         var vpath = videoPath(lot, lot.video.name);
         uploads.push(
           supaUpload(vpath, lot.video.file, lot.video.file.type || "video/mp4").then(function(){
@@ -1823,6 +1828,15 @@
     if(state.cur.videoUploaded) state.cur.videoStamp = Date.now();
     state.cur.video = {file:f, name:f.name || "video", size:f.size, url:URL.createObjectURL(f), na:false};
     state.cur.videoUploaded = null;
+
+    // Our storage rejects anything over 50 MB, and a two-minute phone video
+    // is routinely several times that. Catch it here rather than letting the
+    // seller watch a progress bar crawl for ten minutes and then fail.
+    if(f.size > VIDEO_MAX_BYTES){
+      videoUp = {status:"toobig", pct:0, msg:formatBytes(f.size)};
+      render();
+      return;
+    }
     render();
     syncVideoLive(state.cur);
   });
@@ -2536,14 +2550,18 @@
 
     main.appendChild(el(
       '<div class="callout">'+
-        '<h3>What to capture — about 2 minutes</h3>'+
+        '<h3>Keep it to about 45 seconds</h3>'+
+        '<p style="margin:6px 0 10px;font-size:13.5px;line-height:1.6;">'+
+        '<b>Short is better.</b> Longer videos are too big to send from a phone — '+
+        '45 seconds of the machine running tells a buyer everything they need.</p>'+
         '<ol>'+
           '<li>Start the engine — let the camera catch it starting and idling.</li>'+
-          '<li>Move it under its own power — drive, track, or turn a short distance.</li>'+
-          '<li>Cycle anything that moves — raise/lower the boom, bucket, blade, or attachment.</li>'+
-          '<li>Walk a slow circle around it while recording, so buyers see all sides in motion.</li>'+
+          '<li>Move it under its own power, even a few feet.</li>'+
+          '<li>Cycle one thing that moves — boom, bucket, blade, or attachment.</li>'+
           '<li>Hold your phone sideways (landscape) and keep it steady.</li>'+
         '</ol>'+
+        '<p style="margin:10px 0 0;font-size:13px;color:var(--steel);">'+
+        'Already have a longer one? Text it to '+esc(HELP_PHONE)+' instead — your phone will shrink it for you.</p>'+
       '</div>'
     ));
 
@@ -2606,13 +2624,40 @@
         card.appendChild(bar);
       } else if(videoUp.status === "done"){
         card.appendChild(el('<div class="tip" style="color:var(--good);">✅ Video sent to Bright Star. You can keep going.</div>'));
-      } else if(videoUp.status === "failed"){
+      } else if(videoUp.status === "toobig" || videoUp.status === "failed"){
+        var tooBig = videoUp.status === "toobig";
         var fail = el('<div style="margin-top:10px;"></div>');
-        fail.appendChild(el('<div class="tip" style="color:var(--warn);">Video did not send — '+esc(videoUp.msg)+'. Your photos are not affected.</div>'));
-        var again = el('<button class="btn primary full" style="margin-top:8px;">Try Sending The Video Again</button>');
-        on(again, "click", function(){ syncVideoLive(state.cur); });
-        fail.appendChild(again);
-        var dropIt = el('<button class="btn ghost full" style="margin-top:8px;">Give Up On The Video — Submit Without It</button>');
+        fail.appendChild(el(
+          '<div class="callout" style="border-color:var(--warn);margin:0;">'+
+            '<h3>'+(tooBig ? 'That video is too long to send' : 'The video didn’t send')+'</h3>'+
+            '<p style="margin:6px 0 0;font-size:13.5px;line-height:1.6;">'+
+            (tooBig
+              ? 'It is <b>'+esc(videoUp.msg)+'</b>, and we can only take about 45 MB — roughly <b>45 seconds</b> of video. '+
+                'Your photos are already safe. Pick whichever of these is easiest:'
+              : esc(videoUp.msg)+'. Your photos are not affected. Pick whichever of these is easiest:')+
+            '</p>'+
+          '</div>'
+        ));
+
+        if(!tooBig){
+          var again = el('<button class="btn primary full" style="margin-top:8px;">Try Sending It Again</button>');
+          on(again, "click", function(){ syncVideoLive(state.cur); });
+          fail.appendChild(again);
+        }
+
+        var shorter = el('<button class="btn '+(tooBig?'primary':'')+' full" style="margin-top:8px;">Record A Shorter One (45 seconds)</button>');
+        on(shorter, "click", function(){ videoUp = null; videoInput.click(); });
+        fail.appendChild(shorter);
+
+        // Texting is the path sellers actually manage — their phone shrinks
+        // the video automatically and it reaches us straight away.
+        var textIt = el('<a class="btn full" style="margin-top:8px;text-decoration:none;display:block;text-align:center;" '+
+          'href="sms:'+esc(HELP_TEL)+'">Text The Video To '+esc(HELP_PHONE)+'</a>');
+        fail.appendChild(textIt);
+        fail.appendChild(el('<div class="qhint" style="margin-top:6px;">Texting it is usually easiest — your phone shrinks it for you. '+
+          'Mention your name and the machine so we can match it up.</div>'));
+
+        var dropIt = el('<button class="btn ghost full" style="margin-top:8px;">Carry On Without A Video</button>');
         on(dropIt, "click", function(){
           state.cur.video = {na:true};
           state.cur.videoUploaded = null;
