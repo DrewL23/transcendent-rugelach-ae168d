@@ -555,7 +555,8 @@
     }).then(function(){
       var left = unsentCount(lot);
       render();
-      if(left) alert(left+" photo"+(left===1?"":"s")+" still could not be sent.\n\nMove somewhere with better signal and tap it again. Your photos are safe on this phone in the meantime.");
+      if(left) alert(left+" photo"+(left===1?"":"s")+" still could not be sent.\n\n"+
+        "They are safe on this phone. Rather than keep fighting it, text them to "+HELP_PHONE+" and we will take it from there.");
     });
   }
 
@@ -2082,7 +2083,8 @@
     // card, so every other screen gets this one-tap line instead.
     if(state.screen !== "welcome"){
       top.appendChild(el(
-        '<div class="helprow">Questions? <a href="tel:'+esc(HELP_TEL)+'">Call '+esc(HELP_PHONE)+'</a>'+
+        '<div class="helprow">Stuck? <a href="sms:'+esc(HELP_TEL)+'">Text us</a> or '+
+        '<a href="tel:'+esc(HELP_TEL)+'">call '+esc(HELP_PHONE)+'</a>'+
         '<span style="float:right;'+(unsentCount(state.cur) ? 'color:var(--warn);font-weight:700;' : 'opacity:.8;')+'">'+
         (unsentCount(state.cur)
           ? '⚠️ '+unsentCount(state.cur)+' not sent'
@@ -2172,12 +2174,15 @@
     ));
     main.appendChild(el(
       '<div class="callout helpcard">'+
-        '<h3>Questions? Just call.</h3>'+
+        '<h3>Don’t fight it — call or text us</h3>'+
         '<p style="margin:6px 0 10px;font-size:14px;line-height:1.5;">'+
-        'If at any time you have any questions while using this app, please call '+
-        '<b>'+esc(HELP_PHONE)+'</b>. We would rather talk you through it than have you guess.</p>'+
+        'If anything here gives you trouble, stop and call <b>'+esc(HELP_PHONE)+'</b>. '+
+        '<b>You can also just text us the photos and video</b> and we will catalog it for you. '+
+        'Never spend more than a few minutes stuck.</p>'+
         '<a class="btn primary full" style="text-decoration:none;display:block;text-align:center;" '+
         'href="tel:'+esc(HELP_TEL)+'">Call '+esc(HELP_PHONE)+'</a>'+
+        '<a class="btn full" style="margin-top:8px;text-decoration:none;display:block;text-align:center;" '+
+        'href="sms:'+esc(HELP_TEL)+'">Text '+esc(HELP_PHONE)+' Instead</a>'+
       '</div>'
     ));
     main.appendChild(el(
@@ -2363,12 +2368,16 @@
     var box = el('<div class="callout" style="border-color:var(--warn);"></div>');
     box.appendChild(el('<h3>⚠️ '+n+' photo'+(n===1?'':'s')+' haven’t reached us</h3>'));
     box.appendChild(el('<p style="margin:6px 0 0;font-size:13.5px;line-height:1.6;">'+
-      'They are saved on this phone but could not be sent — usually a weak signal. '+
-      '<b>Don’t close this page yet.</b> Move somewhere with better service and tap below.</p>'));
+      'They are safe on this phone, but the send didn’t go through. '+
+      '<b>Don’t close this page yet</b> — try once more:</p>'));
     var b = el('<button class="btn primary full" style="margin-top:10px;">Send Them Now</button>');
     on(b, "click", function(){ retryUnsent(state.cur, b); });
     box.appendChild(b);
-    box.appendChild(el('<div class="qhint" style="margin-top:8px;">Still stuck? Call '+esc(HELP_PHONE)+' and we will sort it out with you.</div>'));
+    box.appendChild(el('<div class="qhint" style="margin-top:10px;">If that doesn’t work, don’t keep fighting it — '+
+      'text the photos straight to us and we will do the rest:</div>'));
+    box.appendChild(el('<a class="btn full" style="margin-top:8px;text-decoration:none;display:block;text-align:center;" '+
+      'href="sms:'+esc(HELP_TEL)+'">Text Them To '+esc(HELP_PHONE)+'</a>'));
+    box.appendChild(el('<div class="qhint" style="margin-top:8px;">Or call '+esc(HELP_PHONE)+' and we will sort it out with you.</div>'));
     return box;
   }
 
@@ -2588,6 +2597,32 @@
     card.appendChild(frame);
 
     card.appendChild(el('<div class="rotatebanner">📱 Turn your phone to the side and record from the side to get the full width of the picture.</div>'));
+
+    // Texting is now the headline option. Uploading a video from a phone has
+    // been the single biggest source of wasted seller time — a text has
+    // nothing to fail: their phone compresses it and sends it straight to us.
+    if(!hasVideo && !isNA && !videoAlreadySent){
+      var easy = el('<div class="callout" style="border-color:var(--good);"></div>');
+      easy.appendChild(el('<h3>Easiest: text it to us</h3>'));
+      easy.appendChild(el('<p style="margin:6px 0 10px;font-size:13.5px;line-height:1.6;">'+
+        'Tap below and your phone sends the video straight to Bright Star — '+
+        '<b>no upload, nothing to go wrong</b>, and your phone shrinks it for you. '+
+        'Say your name and the machine in the message.</p>'));
+      easy.appendChild(el('<a class="btn primary full" style="text-decoration:none;display:block;text-align:center;" '+
+        'href="sms:'+esc(HELP_TEL)+'">Text The Video To '+esc(HELP_PHONE)+'</a>'));
+      var doneTexting = el('<button class="btn ghost full" style="margin-top:8px;">I’ve Texted It — Carry On</button>');
+      on(doneTexting, "click", function(){
+        state.cur.video = {na:true, texted:true};
+        state.cur.videoUploaded = null;
+        videoUp = null;
+        syncDetailsNow(state.cur);
+        state.screen = "specs";
+        render();
+      });
+      easy.appendChild(doneTexting);
+      card.appendChild(easy);
+      card.appendChild(el('<div class="qhint" style="margin:14px 0 4px;text-align:center;">— or upload it here instead —</div>'));
+    }
 
     var btnrow = el('<div class="btnrow"></div>');
     var takeBtn = el('<button class="btn primary">'+(hasVideo?"Replace Video":"Record / Choose Video")+'</button>');
@@ -3181,14 +3216,14 @@
           '<div class="bigicon">⚠️</div>'+
           '<h1 class="screentitle">Not Sent Yet</h1>'+
           '<p class="sub" style="margin:0 auto;"><b>'+esc(machine||"Your item")+'</b> is saved on this device, but it did '+
-          '<b>not</b> reach Bright Star — usually a weak signal. Your photos are not lost.</p>'+
+          '<b>not</b> reach Bright Star. Your photos are not lost.</p>'+
         '</div>'
       ));
       main.appendChild(el(
         '<div class="callout" style="border-color:var(--warn);">'+
           '<h3>Please do one of these</h3>'+
           '<ol>'+
-            '<li>Move somewhere with better signal, then tap <b>Try Sending Again</b> below.</li>'+
+            '<li>Tap <b>Try Sending Again</b> below.</li>'+
             '<li>Or tap <b>Finish Session</b>, download the packet, and email it to '+esc(EMAIL_TO)+'.</li>'+
           '</ol>'+
         '</div>'
@@ -3206,7 +3241,7 @@
         }).catch(function(){
           retryBtn.disabled = false;
           retryBtn.textContent = "Try Sending Again";
-          alert("Still could not reach Bright Star. Check your signal, or finish up and email the packet instead.");
+          alert("Still could not reach Bright Star.\n\nDon't keep fighting it — text your photos to "+HELP_PHONE+" or call us, and we will finish it for you.");
         });
       });
       main.appendChild(retryBtn);
