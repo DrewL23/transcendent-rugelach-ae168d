@@ -650,13 +650,11 @@
     // Everyone who started and stopped, worth most first — a seller who shot
     // 30 photos and never pressed Submit is a far better call than one who
     // opened the app and put it down.
-    var inProgress = state.lots.filter(function(l){ return l.status === "in_progress"; });
-    var stalled = inProgress.filter(function(l){ return !l.followed_up_at; })
-      .sort(function(a,b){ return (b.photos||[]).length - (a.photos||[]).length; });
-    var called = inProgress.filter(function(l){ return !!l.followed_up_at; })
-      .sort(function(a,b){ return (b.followed_up_at||"") < (a.followed_up_at||"") ? -1 : 1; });
+    var stalled = state.lots.filter(function(l){
+      return l.status === "in_progress" && !l.followed_up_at;
+    }).sort(function(a,b){ return (b.photos||[]).length - (a.photos||[]).length; });
 
-    function callRow(l, alreadyCalled){
+    function callRow(l){
       var li = l.info || {};
       var n = (l.photos||[]).length;
       var contact = [];
@@ -664,9 +662,6 @@
       if(li.phone) contact.push('<a href="tel:'+esc(String(li.phone).replace(/[^0-9+]/g,""))+'" style="color:var(--accent);font-weight:700;">'+esc(li.phone)+'</a>');
       if(li.location) contact.push(esc(li.location));
       var who = contact.length ? contact.join(" · ") : '<span style="color:var(--warn);">no contact details given</span>';
-      if(alreadyCalled && l.followed_up_at){
-        who += ' <span style="color:var(--steel);">· called '+esc(new Date(l.followed_up_at).toLocaleDateString())+'</span>';
-      }
       var row = el(
         '<div class="lotrow" style="cursor:default;">'+
           '<div style="cursor:pointer;flex:1;"><div class="nm">'+esc(lotDisplayName(l))+'</div>'+
@@ -676,16 +671,17 @@
       );
       on(row.firstElementChild, "click", function(){ state.current = l; state.screen = "detail"; render(); });
 
-      var btn = el('<button class="btn" style="padding:6px 12px;font-size:12px;white-space:nowrap;">'+
-        (alreadyCalled ? "Put Back" : "Called ✓")+'</button>');
+      // Takes the reminder away. The submission itself stays in the list
+      // below with all its photos — this only clears the nag.
+      var btn = el('<button class="btn" style="padding:6px 12px;font-size:12px;white-space:nowrap;">Remove</button>');
       on(btn, "click", function(ev){
         ev.stopPropagation();
         btn.disabled = true; btn.textContent = "...";
-        setFollowedUp(l.id, alreadyCalled ? null : new Date().toISOString()).then(function(){
-          l.followed_up_at = alreadyCalled ? null : new Date().toISOString();
+        setFollowedUp(l.id, new Date().toISOString()).then(function(){
+          l.followed_up_at = new Date().toISOString();
           render();
         }).catch(function(err){
-          btn.disabled = false; btn.textContent = alreadyCalled ? "Put Back" : "Called ✓";
+          btn.disabled = false; btn.textContent = "Remove";
           alert(err.message);
         });
       });
@@ -695,28 +691,32 @@
 
     if(stalled.length){
       var fc = el('<div class="card" style="border-color:var(--accent);"></div>');
-      fc.appendChild(el('<span class="qlabel">Needs a follow-up call ('+stalled.length+')</span>'));
+      var fhead = el('<div class="toolbar" style="margin:0 0 4px;"></div>');
+      fhead.appendChild(el('<span class="qlabel" style="margin:0;">Needs a follow-up call ('+stalled.length+')</span>'));
+      var clearAll = el('<button class="btn" style="padding:6px 12px;font-size:12px;">Remove All</button>');
+      on(clearAll, "click", function(){
+        if(!confirm("Remove all "+stalled.length+" follow-up reminders?\n\nThe submissions and their photos stay exactly as they are — this only clears the call list.")) return;
+        clearAll.disabled = true; clearAll.textContent = "Removing...";
+        var when = new Date().toISOString();
+        var chain = Promise.resolve();
+        stalled.forEach(function(l){
+          chain = chain.then(function(){
+            return setFollowedUp(l.id, when).then(function(){ l.followed_up_at = when; });
+          });
+        });
+        chain.then(function(){ render(); }).catch(function(err){
+          clearAll.disabled = false; clearAll.textContent = "Remove All";
+          alert(err.message);
+          render();
+        });
+      });
+      fhead.appendChild(clearAll);
+      fc.appendChild(fhead);
       fc.appendChild(el('<div class="qhint">Started but never submitted. Everything they did send is already saved — '+
         'open one to copy a link that drops them back exactly where they stopped. '+
-        'Tap <b>Called</b> once you have spoken to them and it comes off this list.</div>'));
-      stalled.forEach(function(l){ fc.appendChild(callRow(l, false)); });
+        '<b>Remove</b> clears the reminder without touching the submission.</div>'));
+      stalled.forEach(function(l){ fc.appendChild(callRow(l)); });
       app.appendChild(fc);
-    } else if(inProgress.length){
-      app.appendChild(el('<div class="card"><span class="qlabel">Follow-up calls</span>'+
-        '<div class="qhint">All caught up — everyone who stalled has been called.</div></div>'));
-    }
-
-    if(called.length){
-      var cc = el('<div class="card"></div>');
-      var head = el('<span class="qlabel" style="cursor:pointer;">Already called ('+called.length+') ▾</span>');
-      cc.appendChild(head);
-      var body = el('<div style="display:'+(state.showCalled?'block':'none')+';"></div>');
-      body.appendChild(el('<div class="qhint">Still unsubmitted, but you have spoken to them. '+
-        '<b>Put Back</b> returns one to the call list.</div>'));
-      called.forEach(function(l){ body.appendChild(callRow(l, true)); });
-      cc.appendChild(body);
-      on(head, "click", function(){ state.showCalled = !state.showCalled; render(); });
-      app.appendChild(cc);
     }
 
     state.lots.forEach(function(lot){
